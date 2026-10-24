@@ -72,29 +72,46 @@ const Text = memo(function Text({ text }: { text: string }) {
 function BlockView({ block, results, t }: { block: Block; results: Map<string, Block & { type: 'tool_result' }>; t: T }) {
   switch (block.type) {
     case 'text':
-      return <Text text={block.text} />;
+      return (
+        <div className="turn">
+          <span className="mark">⏺</span>
+          <Text text={block.text} />
+        </div>
+      );
     case 'thinking':
       return block.text ? (
         <details className="tool thinking">
-          <summary>{t('thinking')}</summary>
-          <pre className="code">{block.text}</pre>
+          <summary>
+            <span className="mark">∗</span>
+            <span className="tool-line">
+              <span className="tool-name">{t('thinking')}</span>
+              <span className="tool-chev">▸</span>
+            </span>
+          </summary>
+          <div className="tool-body">
+            <pre className="code">{block.text}</pre>
+          </div>
         </details>
       ) : null;
     case 'tool_use': {
       const res = results.get(block.id);
       const summary = toolSummary(block.name, block.input);
       return (
-        <details className={`tool ${res?.isError ? 'is-error' : ''}`}>
+        <details className={`tool ${res ? (res.isError ? 'is-error' : 'ok') : 'pending'}`}>
           <summary>
-            <span className="tool-name">{block.name}</span>
-            {summary && <span className="tool-summary">{summary}</span>}
-            {res && <span className={`tool-dot ${res.isError ? 'err' : 'ok'}`} title={res.isError ? t('error') : t('result')} />}
+            <span className="mark">⏺</span>
+            <span className="tool-line">
+              <span className="tool-name">{block.name}</span>
+              {summary && <span className="tool-summary">{summary}</span>}
+              <span className="tool-chev">▸</span>
+            </span>
           </summary>
           <div className="tool-body">
             <ToolInput name={block.name} input={block.input} />
             {res && (
               <>
-                <div className="muted small" style={{ marginTop: 8 }}>
+                <div className={`result-head ${res.isError ? 'err' : ''}`}>
+                  <span className="elbow">⎿</span>
                   {res.isError ? t('error') : t('result')}
                 </div>
                 <pre className="code result">{res.text || '(empty)'}</pre>
@@ -147,7 +164,7 @@ export const MessageGroup = memo(function MessageGroup({ group, results, t }: { 
   return (
     <div className={`msg ${group.role}`}>
       <div className="msg-meta">
-        <span className="who">{group.role === 'user' ? 'You' : 'Claude'}</span>
+        <span className="who">{group.role === 'user' ? t('you') : 'Claude'}</span>
         <span className="time">{fmtTime(group.ts)}</span>
       </div>
       <div className="bubble">

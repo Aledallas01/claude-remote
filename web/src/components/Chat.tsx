@@ -95,7 +95,7 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
       <div className="chat-head">
         <div className="ellipsis">
           <div className="chat-title ellipsis">{isNew ? t('newSession') : meta?.title}</div>
-          <div className="muted small ellipsis">{isNew ? cwd || t('project') : meta?.cwd}</div>
+          <div className="muted path ellipsis">{isNew ? cwd || t('project') : meta?.cwd}</div>
         </div>
         <span className={`status ${status}`}>
           {statusLabel}
@@ -129,19 +129,22 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
         ))}
         {partial && (
           <div className="msg assistant streaming">
-            <div className="msg-meta">
-              <span className="who">Claude</span>
-            </div>
             <div className="bubble">
-              <div className="md" dangerouslySetInnerHTML={{ __html: partialHtml }} />
+              <div className="turn">
+                <span className="mark">⏺</span>
+                <div className="md" dangerouslySetInnerHTML={{ __html: partialHtml }} />
+              </div>
             </div>
           </div>
         )}
         {status === 'running' && !partial && pending.length === 0 && (
           <div className="typing">
-            <span />
-            <span />
-            <span />
+            <span className="mark">⏺</span>
+            <span className="dots">
+              <span />
+              <span />
+              <span />
+            </span>
           </div>
         )}
         {pending.map((p) => (
@@ -150,7 +153,7 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
       </div>
 
       <div className="composer">
-        {liveElsewhere && <div className="muted small">{status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
+        {liveElsewhere && <div className="hint">{status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
         {queued > 0 && (
           <div className="queued">
             <span>
@@ -163,25 +166,38 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
             )}
           </div>
         )}
-        <textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder={isNew ? t('composerPlaceholderNew') : t('composerPlaceholder')} />
-        <div className="composer-row">
-          <label className="muted small">
-            {t('permissionMode')}{' '}
-            <select className="input compact" value={mode} onChange={(e) => changeMode(e.target.value as (typeof MODES)[number])}>
+        <div className="composer-box">
+          <textarea
+            className="composer-input"
+            rows={2}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              // Grow with the text, up to the CSS max-height.
+              e.target.style.height = 'auto';
+              e.target.style.height = `${e.target.scrollHeight}px`;
+            }}
+            onKeyDown={onKey}
+            placeholder={isNew ? t('composerPlaceholderNew') : t('composerPlaceholder')}
+          />
+          <div className="composer-row">
+            <select className="input compact" value={mode} onChange={(e) => changeMode(e.target.value as (typeof MODES)[number])} aria-label={t('permissionMode')} title={t('permissionMode')}>
               <option value="default">{t('modeDefault')}</option>
               <option value="acceptEdits">{t('modeAcceptEdits')}</option>
               <option value="plan">{t('modePlan')}</option>
             </select>
-          </label>
-          <span className="spacer" />
-          {status === 'running' && !isNew && !liveElsewhere && (
-            <button className="btn danger" onClick={onInterrupt}>
-              {t('stop')}
+            <span className="spacer" />
+            {status === 'running' && !isNew && !liveElsewhere && (
+              <button className="btn danger compact" onClick={onInterrupt}>
+                {t('stop')}
+              </button>
+            )}
+            <button className="send-btn" onClick={submit} disabled={busy || !text.trim() || (isNew && !cwd.trim())} aria-label={t('send')} title={t('send')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
             </button>
-          )}
-          <button className="btn primary" onClick={submit} disabled={busy || !text.trim() || (isNew && !cwd.trim())}>
-            {t('send')}
-          </button>
+          </div>
         </div>
       </div>
     </section>

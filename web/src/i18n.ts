@@ -79,6 +79,7 @@ const en = {
   menu: 'Menu',
   back: 'Back',
   selectAll: 'Select',
+  you: 'You',
 };
 
 const it: typeof en = {
@@ -162,6 +163,7 @@ const it: typeof en = {
   menu: 'Menu',
   back: 'Indietro',
   selectAll: 'Seleziona',
+  you: 'Tu',
 };
 
 export type Lang = 'en' | 'it';

@@ -23,7 +23,7 @@ export function cleanText(text) {
   let t = text;
   if (/<local-command-stdout>/.test(t) || /<local-command-caveat>/.test(t)) return '';
   t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
-  t = t.replace(/<pasted_content[^>]*>/g, '').replace(/<\/pasted_content>/g, '');
+  t = t.replace(/<\/?pasted_content[^>]*>/g, ''); // closing tags carry the same id attribute
   const cmd = t.match(/<command-name>([\s\S]*?)<\/command-name>/);
   if (cmd) {
     const args = t.match(/<command-args>([\s\S]*?)<\/command-args>/);

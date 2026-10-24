@@ -46,10 +46,11 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <input className="input" placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="btn primary" onClick={onNew} title={t('newSession')}>
-          ＋
+        <button className="btn primary new-btn" onClick={onNew}>
+          <span className="plus">+</span>
+          {t('newSession')}
         </button>
+        <input className="input" placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="session-list">
         {filtered.length === 0 && <div className="muted small pad">{t('noSessions')}</div>}

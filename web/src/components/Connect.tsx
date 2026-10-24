@@ -88,13 +88,14 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
   );
 }
 
+// A terracotta starburst, in the spirit of the Claude mark.
 export function Logo({ size = 40 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
-      <rect x="4" y="8" width="40" height="28" rx="6" fill="var(--accent)" />
-      <rect x="10" y="14" width="28" height="16" rx="3" fill="var(--bg)" />
-      <path d="M16 20h8M16 24h12" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="36" cy="36" r="8" fill="var(--ok)" stroke="var(--bg)" strokeWidth="3" />
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" fill="var(--accent)">
+      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+        <rect key={deg} x="21.5" y="3" width="5" height="16" rx="2.5" transform={`rotate(${deg} 24 24)`} />
+      ))}
+      <circle cx="24" cy="24" r="6" />
     </svg>
   );
 }
