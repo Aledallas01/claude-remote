@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-export const DEFAULT_WEB_URL = 'https://claude-remote.vercel.app';
+export const DEFAULT_WEB_URL = 'https://claude-remote-three.vercel.app';
 export const DEFAULT_PORT = 3721;
 
 export function configDir() {

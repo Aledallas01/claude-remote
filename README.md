@@ -1,5 +1,7 @@
 # Claude Remote
 
+**Web UI:** https://claude-remote-three.vercel.app · **Repo:** https://github.com/Aledallas01/claude-remote
+
 See your **Claude Code** sessions, answer its questions, approve or deny tool calls and send new
 messages, from any browser or phone, while Claude keeps running on your own PC.
 
@@ -42,7 +44,7 @@ messages, from any browser or phone, while Claude keeps running on your own PC.
 4. The console prints a **link and a QR code**. Open the link on your phone or in any browser, or scan
    the QR. That is it: the page connects to your PC.
 
-The link looks like `https://claude-remote.vercel.app/#a=wss://…trycloudflare.com&t=<token>`.
+The link looks like `https://claude-remote-three.vercel.app/#a=wss://…trycloudflare.com&t=<token>`.
 Everything after `#` never leaves your browser (URL fragments are not sent to web servers), and the
 page stores it in `localStorage` only if you tick *Remember on this device*.
 
