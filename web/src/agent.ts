@@ -217,7 +217,8 @@ export function normalizeAgentUrl(input: string): string {
   if (!s) return s;
   if (/^https?:\/\//.test(s)) s = s.replace(/^http/, 'ws');
   else if (!/^wss?:\/\//.test(s)) {
-    const local = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(s);
+    // Private LAN ranges and Tailscale (100.64.0.0/10) are reached over plain ws://.
+    const local = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(s);
     s = (local ? 'ws://' : 'wss://') + s;
   }
   return s;

@@ -4,6 +4,7 @@
 //   GET  /*           -> the web UI if ../web/dist exists (self-hosted mode)
 //   WS   /ws          -> the protocol used by the web UI (token authenticated)
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -184,20 +185,32 @@ export class AgentServer {
   // ---------- WebSocket ----------
 
   clientIp(req) {
-    return String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || 'unknown');
+    const remote = String(req.socket.remoteAddress || 'unknown');
+    // Proxy headers are trusted only when the connection comes from a local connector
+    // (cloudflared, tailscaled). A direct LAN / Tailscale client could forge them.
+    const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+    if (!loopback) return remote;
+    const hdr = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    return hdr && net.isIP(hdr) ? hdr : remote;
   }
 
+  // Per-IP limit, plus a global one so forged addresses cannot buy unlimited guesses.
   tooManyFailures(ip) {
     const now = Date.now();
-    const list = (this.failures.get(ip) || []).filter((t) => now - t < FAIL_WINDOW_MS);
-    this.failures.set(ip, list);
-    return list.length >= FAIL_MAX;
+    const prune = (key) => {
+      const list = (this.failures.get(key) || []).filter((t) => now - t < FAIL_WINDOW_MS);
+      this.failures.set(key, list);
+      return list.length;
+    };
+    return prune(ip) >= FAIL_MAX || prune('*') >= FAIL_MAX * 10;
   }
 
   recordFailure(ip) {
-    const list = this.failures.get(ip) || [];
-    list.push(Date.now());
-    this.failures.set(ip, list);
+    for (const key of [ip, '*']) {
+      const list = this.failures.get(key) || [];
+      list.push(Date.now());
+      this.failures.set(key, list);
+    }
   }
 
   onConnection(ws, req) {

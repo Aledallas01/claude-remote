@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Claude Remote agent entry point.
 import readline from 'node:readline';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import qrcode from 'qrcode-terminal';
 import { loadConfig, saveConfig, rotateToken, configPath } from './config.js';
 import { AgentServer } from './server.js';
@@ -19,7 +23,8 @@ Options:
   --port <n>            Local port (default 3721; saved)
   --host <addr>         Bind address (default 127.0.0.1; use 0.0.0.0 for LAN access; saved)
   --no-tunnel           Do not start the Cloudflare quick tunnel (LAN / local use)
-  --public-url <url>    You expose the agent yourself (own tunnel/proxy): print the link with this URL
+  --public-url <url>    You expose the agent yourself (Tailscale Funnel, named Cloudflare tunnel,
+                        reverse proxy...): also print a link with this stable URL (saved; "off" clears)
   --web <url>           Web UI base URL used in the connection link (saved)
   --hook-wait <sec>     How long a terminal session waits for a web answer (saved)
   --install-hooks       Add Claude Code hooks (~/.claude/settings.json) and exit
@@ -68,13 +73,21 @@ function ask(question) {
   });
 }
 
-function buildLink(cfg, wsBase) {
+// The agent serves the web UI itself when ../web/dist exists (start.bat builds it). Links that
+// point at a LAN / Tailscale / self-exposed address use that copy, so the phone needs to reach
+// one host only, and plain-http LAN pages can open plain ws:// sockets (browsers block ws:// from
+// an https page). The Cloudflare tunnel link keeps using the hosted web UI.
+const WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist', 'index.html');
+const selfHosted = () => fs.existsSync(WEB_DIST);
+
+function buildLink(cfg, wsBase, { self = false } = {}) {
   const params = new URLSearchParams({ a: wsBase, t: cfg.token, n: cfg.agentName });
-  return `${cfg.webUrl.replace(/\/$/, '')}/#${params.toString()}`;
+  const webBase = self && selfHosted() ? wsBase.replace(/^ws/, 'http') : cfg.webUrl.replace(/\/$/, '');
+  return `${webBase}/#${params.toString()}`;
 }
 
-function printLink(cfg, wsBase, label) {
-  const link = buildLink(cfg, wsBase);
+function printLink(cfg, wsBase, label, opts) {
+  const link = buildLink(cfg, wsBase, opts);
   console.log('');
   console.log(`══════════ ${label} ══════════`);
   console.log(`Open this link (it contains your secret token, keep it private):`);
@@ -83,6 +96,41 @@ function printLink(cfg, wsBase, label) {
   console.log('');
   qrcode.generate(link, { small: true }, (code) => console.log(code));
   console.log(`Agent address: ${wsBase}`);
+  console.log('');
+}
+
+// Non-loopback IPv4 addresses of this PC: LAN first, then Tailscale (100.64.0.0/10), then the rest.
+function localAddresses() {
+  const out = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family !== 'IPv4' && a.family !== 4) continue;
+      if (a.internal) continue;
+      const ip = a.address;
+      if (/^169\.254\./.test(ip)) continue; // link-local: never reachable from a phone
+      const tailscale = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) || /tailscale/i.test(name);
+      const virtual = /vethernet|virtualbox|vmware|hyper-v|docker|wsl|loopback/i.test(name);
+      out.push({ name, ip, tailscale, virtual });
+    }
+  }
+  const rank = (a) => (a.tailscale ? 1 : a.virtual ? 2 : 0);
+  return out.sort((x, y) => rank(x) - rank(y));
+}
+
+function printLocalLinks(cfg) {
+  const addrs = localAddresses().filter((a) => !a.virtual);
+  if (!addrs.length) return;
+  console.log('');
+  console.log('══════════ SAME WI-FI / TAILSCALE (no DNS, no tunnel) ══════════');
+  if (!selfHosted()) {
+    console.log('(build the web UI once to use these: cd web && npm install && npm run build)');
+  }
+  for (const a of addrs) {
+    const wsBase = `ws://${a.ip}:${cfg.port}`;
+    const kind = a.tailscale ? 'Tailscale' : a.name;
+    console.log(`  ${kind}: ${buildLink(cfg, wsBase, { self: true })}`);
+  }
+  console.log('  (Tailscale links work from anywhere while the Tailscale app is on in the phone)');
   console.log('');
 }
 
@@ -131,6 +179,19 @@ async function main() {
   if ((Number.isFinite(args.port) && args.port > 0 && args.port !== cfg.port) || (args.host && args.host !== cfg.host)) {
     if (Number.isFinite(args.port) && args.port > 0) cfg.port = args.port;
     if (args.host) cfg.host = args.host;
+    saveConfig(cfg);
+  }
+  if (args.publicUrl !== undefined) {
+    if (/^(off|none|)$/i.test(args.publicUrl)) {
+      delete cfg.publicUrl;
+    } else {
+      const pub = args.publicUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+      if (!/^wss?:\/\/[^/\s]+$/.test(pub)) {
+        console.error('--public-url must be an http(s):// or ws(s):// origin, e.g. https://pc.tailnet.ts.net:10000');
+        process.exit(1);
+      }
+      cfg.publicUrl = pub;
+    }
     saveConfig(cfg);
   }
   const useTunnel = args.tunnel === false ? false : cfg.tunnel !== false;
@@ -189,17 +250,14 @@ async function main() {
   log(`listening on http://${cfg.host}:${cfg.port}  (sessions indexed: ${server.store.listSessions().length})`);
 
   const localBase = `ws://${cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host}:${cfg.port}`;
-  if (args.publicUrl) {
-    // The user fronts the agent with their own tunnel / reverse proxy (named Cloudflare tunnel,
-    // Tailscale Funnel, ngrok, ...). We only print the link.
-    const pub = args.publicUrl.replace(/^http/, 'ws').replace(/\/$/, '');
-    if (!/^wss?:\/\//.test(pub)) {
-      console.error('--public-url must be an http(s):// or ws(s):// URL');
-      process.exit(1);
-    }
-    printLink(cfg, pub, 'REMOTE ACCESS (your own tunnel)');
-  } else if (!useTunnel) {
-    printLink(cfg, localBase, 'LOCAL ACCESS');
+  if (cfg.publicUrl) {
+    // The user fronts the agent with their own tunnel / reverse proxy (Tailscale Funnel, named
+    // Cloudflare tunnel, ngrok, ...). Stable address, so this link never changes.
+    printLink(cfg, cfg.publicUrl, 'REMOTE ACCESS (your own stable URL)', { self: true });
+  }
+  if (cfg.host === '0.0.0.0' || cfg.host === '::') printLocalLinks(cfg);
+  if (!useTunnel) {
+    if (!cfg.publicUrl) printLink(cfg, localBase, 'THIS PC ONLY');
   } else {
     log('starting Cloudflare quick tunnel...');
     startTunnel(cfg.port, {
@@ -207,13 +265,14 @@ async function main() {
       onUrl: (url) => {
         const wsBase = url.replace(/^http/, 'ws');
         log(`tunnel ready: ${url}`);
-        printLink(cfg, wsBase, 'REMOTE ACCESS');
-        console.log('(a fresh tunnel address can take up to a minute to resolve; just retry if the page cannot connect at first)');
+        printLink(cfg, wsBase, 'REMOTE ACCESS (Cloudflare quick tunnel, new address on every start)');
+        console.log('(a fresh tunnel address can take up to a minute to resolve; just retry if the page cannot connect at first.');
+        console.log(' Some home routers block *.trycloudflare.com: use mobile data, or the links above.)');
         server.broadcast({ type: 'tunnel', url: wsBase });
       },
       onDown: () => server.broadcast({ type: 'tunnel', url: null }),
     });
-    console.log(`(same PC / LAN without tunnel: ${buildLink(cfg, localBase)})`);
+    console.log(`(this PC only: ${buildLink(cfg, localBase)})`);
   }
 
   const shutdown = () => {

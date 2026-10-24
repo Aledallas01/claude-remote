@@ -54,10 +54,12 @@ page stores it in `localStorage` only if you tick *Remember on this device*.
 ```
 node src/index.js [options]
   --port <n>          local port (default 3721)
-  --no-tunnel         LAN / same-PC use only, no Cloudflare tunnel
-  --public-url <url>  you expose the agent yourself (named Cloudflare tunnel, Tailscale Funnel,
-                      ngrok, reverse proxy…): the link is printed with this address
-  --host 0.0.0.0      also listen on your LAN interfaces (use with --no-tunnel)
+  --no-tunnel         no Cloudflare tunnel (LAN / Tailscale / own URL only)
+  --public-url <url>  you expose the agent yourself (Tailscale Funnel, named Cloudflare tunnel,
+                      ngrok, reverse proxy…): a link with this stable address is printed too
+                      (saved; pass "off" to clear)
+  --host 0.0.0.0      also listen on your LAN and Tailscale interfaces: the console then prints
+                      one link per interface (same Wi-Fi / Tailscale, no DNS or tunnel needed)
   --web <url>         web UI base URL used in the printed link (default: the hosted one)
   --hook-wait <sec>   how long a terminal session waits for a web answer (default 180)
   --install-hooks     add the hooks to ~/.claude/settings.json and exit
@@ -142,7 +144,20 @@ with `web` as the root directory. Then point your agent at your deployment with 
   name can take up to a minute to propagate; retry. Some home routers and ISP / parental DNS
   filters block `trycloudflare.com` entirely (the tunnel itself is fine: the name resolves over
   DNS-over-HTTPS but not through the router). Use your phone's mobile data, enable secure DNS
-  in the browser, or expose the agent with a tunnel of your own and pass `--public-url`.
+  in the browser, or use one of the DNS-free routes below.
+- **Safari / Chrome says it cannot find the server.** The phone cannot resolve the host in the
+  link (usually the `*.trycloudflare.com` name, see above). Three routes that do not depend on
+  that name, all with the same token:
+  - *Same Wi-Fi:* start the agent with `--host 0.0.0.0`. It prints a link per interface such as
+    `http://192.168.1.15:3721/#a=ws://192.168.1.15:3721&t=…`: the agent serves the web UI itself
+    (`start.bat` builds it once), so no other host is involved. Allow Node.js through the Windows
+    firewall when asked.
+  - *Tailscale on PC and phone:* with `--host 0.0.0.0` the console also prints a link with the PC's
+    Tailscale IP (`100.x.y.z`). It works from anywhere while the Tailscale app is on in the phone.
+  - *Tailscale Funnel (stable public URL, no Tailscale needed on the phone):*
+    `tailscale funnel --bg --https=10000 3721`, then start the agent with
+    `--public-url https://<pc>.<tailnet>.ts.net:10000`. The link never changes, so you can bookmark it.
+    Turn it off with `tailscale funnel --https=10000 off`.
 - **"The claude CLI is not logged in".** Only relevant when you start a *new* session (or continue
   an idle one) from the web: for that the agent launches Claude with the `claude` CLI's
   credentials. Viewing sessions, answering prompts and messaging sessions that are open on the
