@@ -1,0 +1,173 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Msg, PendingRequest, Project, SessionMeta } from '../types';
+import type { T } from '../i18n';
+import { collectResults, groupMessages, MessageGroup } from './Messages';
+import { RequestCard, type Answer } from './Requests';
+import { renderMarkdown } from '../markdown';
+
+const MODES = ['default', 'acceptEdits', 'plan'] as const;
+
+export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, onSend, onInterrupt, onAnswer }: {
+  t: T;
+  meta?: SessionMeta;
+  isNew?: boolean;
+  draftCwd?: string;
+  projects?: Project[];
+  messages: Msg[];
+  partial: string;
+  loaded: boolean;
+  truncated: boolean;
+  status: 'idle' | 'running' | 'waiting' | 'ended';
+  source?: 'sdk' | 'hook';
+  pending: PendingRequest[];
+  onSend: (text: string, permissionMode: string, cwd?: string) => Promise<void>;
+  onInterrupt: () => void;
+  onAnswer: (req: PendingRequest, a: Answer) => void;
+}) {
+  const [text, setText] = useState('');
+  const [mode, setMode] = useState<(typeof MODES)[number]>(() => {
+    try {
+      const m = localStorage.getItem('claude-remote:mode');
+      return (MODES as readonly string[]).includes(m || '') ? (m as (typeof MODES)[number]) : 'default';
+    } catch {
+      return 'default';
+    }
+  });
+  const [cwd, setCwd] = useState(draftCwd || '');
+  const [busy, setBusy] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+
+  const groups = useMemo(() => groupMessages(messages), [messages]);
+  const results = useMemo(() => collectResults(messages), [messages]);
+  const partialHtml = useMemo(() => (partial ? renderMarkdown(partial) : ''), [partial]);
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [messages, partial, pending.length, loaded]);
+
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
+  const submit = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    if (isNew && !cwd.trim()) return;
+    setBusy(true);
+    try {
+      await onSend(body, mode, isNew ? cwd.trim() : undefined);
+      setText('');
+      stick.current = true;
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const changeMode = (m: (typeof MODES)[number]) => {
+    setMode(m);
+    try {
+      localStorage.setItem('claude-remote:mode', m);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const statusLabel = status === 'running' ? t('running') : status === 'waiting' ? t('waiting') : t('idle');
+
+  return (
+    <section className="chat">
+      <div className="chat-head">
+        <div className="ellipsis">
+          <div className="chat-title ellipsis">{isNew ? t('newSession') : meta?.title}</div>
+          <div className="muted small ellipsis">{isNew ? cwd || t('project') : meta?.cwd}</div>
+        </div>
+        <span className={`status ${status}`}>
+          {statusLabel}
+          {source === 'hook' && status !== 'idle' ? ` · ${t('liveElsewhere')}` : ''}
+        </span>
+      </div>
+
+      <div className="scroll" ref={scroller} onScroll={onScroll}>
+        {isNew && (
+          <div className="new-session">
+            <label className="field">
+              <span>{t('startIn')}</span>
+              <input className="input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder={t('projectPlaceholder')} spellCheck={false} disabled={messages.length > 0} />
+            </label>
+            {projects && projects.length > 0 && messages.length === 0 && (
+              <div className="projects">
+                <div className="muted small">{t('recentProjects')}</div>
+                {projects.slice(0, 12).map((p) => (
+                  <button key={p.cwd} className={`chip ${cwd === p.cwd ? 'on' : ''} ${p.exists ? '' : 'missing'}`} onClick={() => setCwd(p.cwd)} title={p.cwd}>
+                    {p.cwd}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {!loaded && !isNew && <div className="muted small pad">{t('loadingHistory')}</div>}
+        {truncated && <div className="muted small pad center">{t('truncated')}</div>}
+        {groups.map((g, i) => (
+          <MessageGroup key={g.items[0].uuid || i} group={g} results={results} t={t} />
+        ))}
+        {partial && (
+          <div className="msg assistant streaming">
+            <div className="msg-meta">
+              <span className="who">Claude</span>
+            </div>
+            <div className="bubble">
+              <div className="md" dangerouslySetInnerHTML={{ __html: partialHtml }} />
+            </div>
+          </div>
+        )}
+        {status === 'running' && !partial && pending.length === 0 && (
+          <div className="typing">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
+        {pending.map((p) => (
+          <RequestCard key={p.id} req={p} t={t} onAnswer={(a) => onAnswer(p, a)} />
+        ))}
+      </div>
+
+      <div className="composer">
+        <textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder={isNew ? t('composerPlaceholderNew') : t('composerPlaceholder')} />
+        <div className="composer-row">
+          <label className="muted small">
+            {t('permissionMode')}{' '}
+            <select className="input compact" value={mode} onChange={(e) => changeMode(e.target.value as (typeof MODES)[number])}>
+              <option value="default">{t('modeDefault')}</option>
+              <option value="acceptEdits">{t('modeAcceptEdits')}</option>
+              <option value="plan">{t('modePlan')}</option>
+            </select>
+          </label>
+          <span className="spacer" />
+          {status === 'running' && !isNew && (
+            <button className="btn danger" onClick={onInterrupt}>
+              {t('stop')}
+            </button>
+          )}
+          <button className="btn primary" onClick={submit} disabled={busy || !text.trim() || (isNew && !cwd.trim())}>
+            {t('send')}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
