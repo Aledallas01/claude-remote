@@ -80,6 +80,14 @@ const en = {
   back: 'Back',
   selectAll: 'Select',
   you: 'You',
+  groupBy: 'Group sessions by',
+  byProject: 'Project',
+  byDate: 'Date',
+  today: 'Today',
+  yesterday: 'Yesterday',
+  last7: 'Previous 7 days',
+  last30: 'Previous 30 days',
+  older: 'Older',
 };
 
 const it: typeof en = {
@@ -164,6 +172,14 @@ const it: typeof en = {
   back: 'Indietro',
   selectAll: 'Seleziona',
   you: 'Tu',
+  groupBy: 'Raggruppa sessioni per',
+  byProject: 'Progetto',
+  byDate: 'Data',
+  today: 'Oggi',
+  yesterday: 'Ieri',
+  last7: 'Ultimi 7 giorni',
+  last30: 'Ultimi 30 giorni',
+  older: 'Più vecchie',
 };
 
 export type Lang = 'en' | 'it';
