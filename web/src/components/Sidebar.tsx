@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import type { PendingRequest, SessionMeta, SessionState } from '../types';
+import type { PendingRequest, SessionMeta, SessionState, SidebarSection } from '../types';
 import type { T } from '../i18n';
 
-type GroupBy = 'project' | 'time';
+// 'app' mirrors the sections of the Claude desktop app's Code tab (available when the
+// agent runs next to the app); 'project' and 'time' are computed here.
+type GroupBy = 'app' | 'project' | 'time';
 const GROUP_KEY = 'claude-remote:groupBy';
 const COLLAPSED_KEY = 'claude-remote:collapsed';
 
@@ -39,7 +41,6 @@ function saveJson(key: string, value: unknown) {
   }
 }
 
-// Time buckets, oldest boundary first so the first match wins.
 function timeBucket(iso: string, now: number): { key: string; order: number } {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return { key: 'older', order: 4 };
@@ -60,11 +61,14 @@ interface Section {
   sub?: string;
   sessions: SessionMeta[];
   attention: number; // sessions waiting for the user or running
+  defaultCollapsed: boolean;
+  mono?: boolean;
 }
 
-export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew }: {
+export function Sidebar({ t, sessions, sections, states, pending, current, onSelect, onNew }: {
   t: T;
   sessions: SessionMeta[];
+  sections: SidebarSection[];
   states: Record<string, SessionState>;
   pending: PendingRequest[];
   current: string | null;
@@ -72,7 +76,12 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
   onNew: () => void;
 }) {
   const [q, setQ] = useState('');
-  const [groupBy, setGroupBy] = useState<GroupBy>(() => (loadJson<string>(GROUP_KEY, 'project') === 'time' ? 'time' : 'project'));
+  const hasApp = sections.length > 0;
+  const [groupPref, setGroupPref] = useState<GroupBy>(() => {
+    const v = loadJson<string>(GROUP_KEY, 'app');
+    return v === 'time' || v === 'project' || v === 'app' ? v : 'app';
+  });
+  const groupBy: GroupBy = groupPref === 'app' && !hasApp ? 'project' : groupPref;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadJson(COLLAPSED_KEY, {}));
 
   const pendingBy = useMemo(() => {
@@ -83,52 +92,54 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
 
   const rank = (s: SessionMeta) => (pendingBy.has(s.id) ? 0 : states[s.id]?.status === 'running' || states[s.id]?.status === 'waiting' ? 1 : 2);
 
-  const sections = useMemo<Section[]>(() => {
+  const built = useMemo<Section[]>(() => {
     const needle = q.trim().toLowerCase();
-    const list = needle ? sessions.filter((s) => (s.title + ' ' + s.firstPrompt + ' ' + s.cwd).toLowerCase().includes(needle)) : sessions;
+    const visible = sessions.filter((s) => !s.archived);
+    const list = needle ? visible.filter((s) => (s.title + ' ' + s.firstPrompt + ' ' + s.cwd).toLowerCase().includes(needle)) : visible;
     const sorted = [...list].sort((a, b) => rank(a) - rank(b) || (a.updatedAt < b.updatedAt ? 1 : -1));
     const map = new Map<string, Section & { order: number; latest: string }>();
     const now = Date.now();
-    for (const s of sorted) {
-      let key: string;
-      let label: string;
-      let sub: string | undefined;
-      let order = 0;
-      if (groupBy === 'project') {
-        key = `p:${s.cwd.toLowerCase()}`;
-        label = projectName(s.cwd);
-        sub = s.cwd;
-      } else {
-        const b = timeBucket(s.updatedAt, now);
-        key = `t:${b.key}`;
-        label = t(b.key as 'today' | 'yesterday' | 'last7' | 'last30' | 'older');
-        order = b.order;
-      }
+    const add = (key: string, s: SessionMeta, make: () => Omit<Section, 'key' | 'sessions' | 'attention'> & { order: number }) => {
       let sec = map.get(key);
       if (!sec) {
-        sec = { key, label, sub, sessions: [], attention: 0, order, latest: s.updatedAt };
+        const base = make();
+        sec = { key, sessions: [], attention: 0, latest: s.updatedAt, ...base };
         map.set(key, sec);
       }
       sec.sessions.push(s);
       if (rank(s) < 2) sec.attention += 1;
       if (s.updatedAt > sec.latest) sec.latest = s.updatedAt;
+    };
+    const appIndex = new Map(sections.map((sec, i) => [sec.id, { ...sec, i }]));
+    for (const s of sorted) {
+      if (groupBy === 'app') {
+        if (s.pinned) add('pinned', s, () => ({ label: t('pinned'), order: -1, defaultCollapsed: false }));
+        const sec = s.section ? appIndex.get(s.section) : undefined;
+        if (sec) add(`a:${sec.id}`, s, () => ({ label: sec.name, order: sec.i, defaultCollapsed: sec.collapsed }));
+        else add('unsorted', s, () => ({ label: t('unsorted'), order: 1e6, defaultCollapsed: false }));
+      } else if (groupBy === 'project') {
+        add(`p:${s.cwd.toLowerCase()}`, s, () => ({ label: projectName(s.cwd), sub: s.cwd, order: 0, defaultCollapsed: false, mono: true }));
+      } else {
+        const b = timeBucket(s.updatedAt, now);
+        add(`t:${b.key}`, s, () => ({ label: t(b.key as 'today' | 'yesterday' | 'last7' | 'last30' | 'older'), order: b.order, defaultCollapsed: false }));
+      }
     }
     const out = [...map.values()];
     if (groupBy === 'project') out.sort((a, b) => (b.attention > 0 ? 1 : 0) - (a.attention > 0 ? 1 : 0) || (a.latest < b.latest ? 1 : -1));
     else out.sort((a, b) => a.order - b.order);
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, q, states, pendingBy, groupBy, t]);
+  }, [sessions, sections, q, states, pendingBy, groupBy, t]);
 
-  const toggle = (key: string) => {
+  const toggle = (key: string, isOpen: boolean) => {
     setCollapsed((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
+      const next = { ...prev, [key]: isOpen };
       saveJson(COLLAPSED_KEY, next);
       return next;
     });
   };
   const changeGroup = (g: GroupBy) => {
-    setGroupBy(g);
+    setGroupPref(g);
     saveJson(GROUP_KEY, g);
   };
 
@@ -143,6 +154,11 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
         </button>
         <input className="input" placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="seg" role="tablist" aria-label={t('groupBy')}>
+          {hasApp && (
+            <button role="tab" aria-selected={groupBy === 'app'} className={groupBy === 'app' ? 'on' : ''} onClick={() => changeGroup('app')}>
+              {t('byApp')}
+            </button>
+          )}
           <button role="tab" aria-selected={groupBy === 'project'} className={groupBy === 'project' ? 'on' : ''} onClick={() => changeGroup('project')}>
             {t('byProject')}
           </button>
@@ -152,14 +168,16 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
         </div>
       </div>
       <div className="session-list">
-        {sections.length === 0 && <div className="muted small pad">{t('noSessions')}</div>}
-        {sections.map((sec) => {
-          const open = searching || !collapsed[sec.key] || sec.sessions.some((s) => s.id === current && pendingBy.has(s.id));
+        {built.length === 0 && <div className="muted small pad">{t('noSessions')}</div>}
+        {built.map((sec) => {
+          const isCollapsed = collapsed[sec.key] ?? sec.defaultCollapsed;
+          const open = searching || !isCollapsed || sec.sessions.some((s) => s.id === current || pendingBy.has(s.id));
+          const showProject = groupBy !== 'project';
           return (
             <div className="group" key={sec.key}>
-              <button className={`group-head ${open ? 'open' : ''}`} onClick={() => toggle(sec.key)} title={sec.sub || sec.label}>
+              <button className={`group-head ${open ? 'open' : ''}`} onClick={() => toggle(sec.key, open)} title={sec.sub || sec.label}>
                 <span className="group-chev">▸</span>
-                <span className="group-label ellipsis">{sec.label}</span>
+                <span className={`group-label ellipsis ${sec.mono ? 'mono' : ''}`}>{sec.label}</span>
                 {sec.attention > 0 && <span className="dot waiting" />}
                 <span className="group-count">{sec.sessions.length}</span>
               </button>
@@ -169,19 +187,26 @@ export function Sidebar({ t, sessions, states, pending, current, onSelect, onNew
                   const n = pendingBy.get(s.id) || 0;
                   const dot = n ? 'waiting' : st?.status || '';
                   const live = st?.source === 'hook' && st.status !== 'ended';
+                  const parts: React.ReactNode[] = [];
+                  if (showProject) parts.push(<span key="p" className="proj">{projectName(s.cwd)}</span>);
+                  if (s.gitBranch && s.gitBranch !== 'HEAD') parts.push(<span key="b" className="muted">{s.gitBranch}</span>);
+                  if (live) parts.push(<span key="l" className="muted">{t('liveElsewhere')}</span>);
                   return (
-                    <button key={s.id} className={`session ${current === s.id ? 'active' : ''}`} onClick={() => onSelect(s.id)}>
+                    <button key={`${sec.key}:${s.id}`} className={`session ${current === s.id ? 'active' : ''}`} onClick={() => onSelect(s.id)}>
                       <div className="session-row">
                         <span className={`dot ${dot}`} />
                         <span className="session-title ellipsis">{s.title}</span>
                         {n > 0 && <span className="badge warn">{n}</span>}
                         <span className="muted small time">{relTime(s.updatedAt)}</span>
                       </div>
-                      {(groupBy === 'time' || s.gitBranch || live) && (
+                      {parts.length > 0 && (
                         <div className="session-sub ellipsis">
-                          {groupBy === 'time' && <span className="proj">{projectName(s.cwd)}</span>}
-                          {s.gitBranch && s.gitBranch !== 'HEAD' && <span className="muted">{groupBy === 'time' ? ' · ' : ''}{s.gitBranch}</span>}
-                          {live && <span className="muted">{groupBy === 'time' || s.gitBranch ? ' · ' : ''}{t('liveElsewhere')}</span>}
+                          {parts.map((p, i) => (
+                            <span key={i}>
+                              {i > 0 && <span className="muted"> · </span>}
+                              {p}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </button>

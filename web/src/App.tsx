@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AgentClient, loadConnection, parseLink, saveConnection, type ConnStatus } from './agent';
 import { detectLang, makeT, type Lang } from './i18n';
-import type { AgentInfo, Connection, Msg, PendingRequest, Project, SessionMeta, SessionState } from './types';
+import type { AgentInfo, Connection, Msg, PendingRequest, Project, SessionMeta, SessionState, SidebarSection } from './types';
 import { Connect, Logo } from './components/Connect';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
@@ -32,13 +32,14 @@ interface State {
   toasts: { id: number; text: string; kind?: 'info' | 'error' }[];
   tunnel?: string | null;
   queued: Record<string, number>;
+  sections: SidebarSection[];
 }
 
 type Action =
-  | { type: 'hello'; agent: AgentInfo; sessions: SessionMeta[]; states: SessionState[]; pending: PendingRequest[]; queued?: Record<string, number> }
+  | { type: 'hello'; agent: AgentInfo; sessions: SessionMeta[]; sections?: SidebarSection[]; states: SessionState[]; pending: PendingRequest[]; queued?: Record<string, number> }
   | { type: 'queued'; sessionId: string; count: number }
   | { type: 'delivered'; sessionId: string }
-  | { type: 'sessions'; sessions: SessionMeta[] }
+  | { type: 'sessions'; sessions: SessionMeta[]; sections?: SidebarSection[] }
   | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string }
   | { type: 'request'; request: PendingRequest }
   | { type: 'request_resolved'; id: string }
@@ -92,7 +93,7 @@ function reducer(state: State, a: Action): State {
     case 'hello': {
       const states: Record<string, SessionState> = {};
       for (const s of a.states) states[s.sessionId] = s;
-      return { ...state, agent: a.agent, sessions: a.sessions, states, pending: a.pending, queued: a.queued || {} };
+      return { ...state, agent: a.agent, sessions: a.sessions, sections: a.sections || [], states, pending: a.pending, queued: a.queued || {} };
     }
     case 'queued': {
       const queued = { ...state.queued };
@@ -108,7 +109,7 @@ function reducer(state: State, a: Action): State {
       return { ...state, convs: { ...state.convs, [a.sessionId]: { ...prev, messages } } };
     }
     case 'sessions':
-      return { ...state, sessions: a.sessions };
+      return { ...state, sessions: a.sessions, sections: a.sections ?? state.sections };
     case 'status': {
       const states = { ...state.states };
       if (a.status === 'ended') delete states[a.sessionId];
@@ -179,7 +180,7 @@ function reducer(state: State, a: Action): State {
   }
 }
 
-const initialState: State = { agent: null, sessions: [], states: {}, pending: [], convs: {}, current: null, draft: null, toasts: [], queued: {} };
+const initialState: State = { agent: null, sessions: [], sections: [], states: {}, pending: [], convs: {}, current: null, draft: null, toasts: [], queued: {} };
 
 export default function App() {
   const [lang, setLangState] = useState<Lang>(detectLang);
@@ -225,7 +226,7 @@ export default function App() {
     const offMsg = client.onMessage((m) => {
       switch (m.type) {
         case 'hello':
-          dispatch({ type: 'hello', agent: m.agent, sessions: m.sessions, states: m.states, pending: m.pending, queued: m.queued });
+          dispatch({ type: 'hello', agent: m.agent, sessions: m.sessions, sections: m.sections, states: m.states, pending: m.pending, queued: m.queued });
           // Re-subscribe to the open conversation after a reconnect.
           {
             const cur = stateRef.current.current;
@@ -233,7 +234,7 @@ export default function App() {
           }
           break;
         case 'sessions':
-          dispatch({ type: 'sessions', sessions: m.sessions });
+          dispatch({ type: 'sessions', sessions: m.sessions, sections: m.sections });
           break;
         case 'status':
           if (m.sessionId) dispatch({ type: 'status', sessionId: m.sessionId, status: m.status, source: m.source, cwd: m.cwd });
@@ -444,7 +445,7 @@ export default function App() {
         </button>
       </header>
 
-      <Sidebar t={t} sessions={state.sessions} states={state.states} pending={state.pending} current={state.current} onSelect={select} onNew={startNew} />
+      <Sidebar t={t} sessions={state.sessions} sections={state.sections} states={state.states} pending={state.pending} current={state.current} onSelect={select} onNew={startNew} />
       <div className="backdrop" onClick={() => setSidebarOpen(false)} />
 
       <main className="main">

@@ -26,6 +26,18 @@ export interface SessionMeta {
   size: number;
   gitBranch?: string;
   entrypoint?: string;
+  // Filled when the Claude desktop app is installed on the PC.
+  section?: string | null; // sidebar section (custom group) id
+  archived?: boolean;
+  pinned?: boolean;
+}
+
+// A custom sidebar section of the Claude desktop app's Code tab, in sidebar order.
+export interface SidebarSection {
+  id: string;
+  name: string;
+  order: number;
+  collapsed: boolean;
 }
 
 export interface SessionState {

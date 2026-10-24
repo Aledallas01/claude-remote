@@ -14,6 +14,7 @@ import { TranscriptStore } from './transcripts.js';
 import { RequestHub } from './requests.js';
 import { RunnerManager } from './runner.js';
 import { handleHookEvent, hooksStatus } from './hooks.js';
+import { DesktopIndex } from './desktop.js';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const AUTH_TIMEOUT_MS = 8000;
@@ -72,18 +73,40 @@ export class AgentServer {
     this.store.on('messages', ({ sessionId, messages }) => {
       for (const message of messages) this.broadcast({ type: 'message', sessionId, message, live: false });
     });
-    this.store.on('sessions_changed', () => {
-      const payload = JSON.stringify({ type: 'sessions', sessions: this.store.listSessions() });
-      if (payload === this.lastSessionsPayload) return;
-      this.lastSessionsPayload = payload;
-      for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(payload);
-    });
+    this.desktop = new DesktopIndex({ log });
+    this.store.on('sessions_changed', () => this.broadcastSessions());
+    this.desktop.on('changed', () => this.broadcastSessions());
     this.store.on('log', (m) => log(m));
+  }
+
+  // Session list as the web UI sees it: transcript metadata, enriched with the desktop
+  // app's title, sidebar section, pinned and archived flags when the app is installed.
+  sessionsPayload() {
+    const list = this.store.listSessions();
+    if (!this.desktop.available) return list;
+    return list.map((s) => {
+      const d = this.desktop.info(s.id);
+      if (!d) return s;
+      return { ...s, title: d.title || s.title, section: d.section, archived: d.archived, pinned: d.pinned };
+    });
+  }
+
+  broadcastSessions() {
+    const payload = JSON.stringify({ type: 'sessions', sessions: this.sessionsPayload(), sections: this.desktop.sections });
+    if (payload === this.lastSessionsPayload) return;
+    this.lastSessionsPayload = payload;
+    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(payload);
   }
 
   async start() {
     await this.store.scanAll();
     this.store.startWatching();
+    try {
+      await this.desktop.start();
+      if (this.desktop.available) this.log(`desktop app index: ${this.desktop.sections.length} sidebar sections, ${this.desktop.bySession.size} sessions`);
+    } catch (err) {
+      this.log(`desktop app index unavailable: ${err.message}`);
+    }
     this.http = http.createServer((req, res) => this.handleHttp(req, res).catch((err) => {
       this.log(`http error: ${err.message}`);
       if (!res.headersSent) res.writeHead(500);
@@ -104,6 +127,7 @@ export class AgentServer {
   stop() {
     this.runners.closeAll();
     this.store.stop();
+    this.desktop.stop();
     for (const ws of this.clients) ws.close(1001, 'agent shutting down');
     this.wss?.close();
     this.http?.close();
@@ -245,7 +269,8 @@ export class AgentServer {
           this.send(ws, {
             type: 'hello',
             agent: this.agentInfo(),
-            sessions: this.store.listSessions(),
+            sessions: this.sessionsPayload(),
+            sections: this.desktop.sections,
             states: this.statesList(),
             pending: this.hub.list(),
             runners: this.runners.list(),
@@ -316,7 +341,7 @@ export class AgentServer {
       case 'ping':
         return this.send(ws, { type: 'pong', reqId });
       case 'list_sessions':
-        return this.send(ws, { type: 'sessions', reqId, sessions: this.store.listSessions() });
+        return this.send(ws, { type: 'sessions', reqId, sessions: this.sessionsPayload(), sections: this.desktop.sections });
       case 'list_projects':
         return this.send(ws, { type: 'projects', reqId, projects: this.projects() });
       case 'open_session': {
