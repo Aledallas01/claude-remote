@@ -151,15 +151,33 @@ export class AgentClient {
 
 const KEY = 'claude-remote:connection';
 
+// Some scanners / messaging apps re-encode or wrap links; decode until stable.
+function deepDecode(s: string): string {
+  let cur = s;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const next = decodeURIComponent(cur);
+      if (next === cur) break;
+      cur = next;
+    } catch {
+      break;
+    }
+  }
+  return cur;
+}
+
 export function parseLink(input: string): Connection | null {
-  const s = input.trim();
+  let s = input.trim().replace(/^[<"'(\[]+|[>"')\].,;]+$/g, '');
   if (!s) return null;
   let hash = s;
   const idx = s.indexOf('#');
   if (idx >= 0) hash = s.slice(idx + 1);
+  else if (/^\/?[?&]?a=/.test(hash)) hash = hash.replace(/^\/?[?&]/, '');
+  hash = hash.replace(/^[?&]/, '');
+  if (!/(^|&)a=/.test(hash) && /%26a%3D|%23a%3D/i.test(hash)) hash = deepDecode(hash).replace(/^.*#/, '');
   const p = new URLSearchParams(hash);
-  const a = p.get('a');
-  const t = p.get('t');
+  const a = p.get('a') ? deepDecode(p.get('a')!.trim()) : '';
+  const t = (p.get('t') || '').trim();
   if (a && t && /^wss?:\/\//.test(a)) return { url: a.replace(/\/+$/, ''), token: t, name: p.get('n') || undefined };
   return null;
 }

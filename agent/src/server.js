@@ -231,7 +231,8 @@ export class AgentServer {
           });
         } else {
           this.recordFailure(ip);
-          this.log(`auth failed from ${ip}`);
+          const got = typeof msg.token === 'string' ? msg.token : '';
+          this.log(`auth failed from ${ip} (${msg.type === 'auth' ? `token length ${got.length}, expected ${this.cfg.token.length}${got.length === this.cfg.token.length ? ', same length but different' : ''}` : `first message was "${msg.type}"`})`);
           ws.close(4003, 'unauthorized');
         }
         return;

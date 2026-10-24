@@ -41,6 +41,11 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
         <label className="field">
           <span>{t('pasteLink')}</span>
           <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…/#a=wss://…&t=…" autoComplete="off" spellCheck={false} />
+          {parsed && (
+            <span className="muted small">
+              ✓ {parsed.url} · token {parsed.token.length} {parsed.token.length === 43 ? '✓' : '⚠'}
+            </span>
+          )}
         </label>
         <div className="divider">{t('orManual')}</div>
         <label className="field">

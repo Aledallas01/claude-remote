@@ -396,7 +396,13 @@ export default function App() {
   };
 
   if (!conn || (!everConnected && status !== 'connecting')) {
-    return <Connect t={t} lang={lang} setLang={setLang} initial={conn} status={status} error={status === 'unauthorized' ? t('unauthorized') : statusDetail && status === 'disconnected' && conn ? `${t('disconnected')} (${statusDetail})` : undefined} onConnect={onConnect} onForget={onForget} />;
+    const authError =
+      status === 'unauthorized'
+        ? statusDetail === 'too many failed attempts'
+          ? t('tooManyAttempts')
+          : `${t('unauthorized')} ${t('tokenLengthHint').replace('{n}', String(conn?.token.length ?? 0))}`
+        : undefined;
+    return <Connect t={t} lang={lang} setLang={setLang} initial={conn} status={status} error={authError ?? (statusDetail && status === 'disconnected' && conn ? `${t('disconnected')} (${statusDetail})` : undefined)} onConnect={onConnect} onForget={onForget} />;
   }
 
   const currentMeta = state.current && state.current !== 'new' ? state.sessions.find((s) => s.id === state.current) : undefined;
