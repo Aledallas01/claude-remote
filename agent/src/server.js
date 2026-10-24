@@ -90,6 +90,7 @@ export class AgentServer {
     }));
     this.wss = new WebSocketServer({ server: this.http, path: '/ws', maxPayload: MAX_PAYLOAD });
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
+    this.wss.on('error', (err) => this.log(`websocket server error: ${err.message}`)); // ws re-emits http errors here
     await new Promise((resolve, reject) => {
       this.http.once('error', reject);
       this.http.listen(this.cfg.port, this.cfg.host, () => {
