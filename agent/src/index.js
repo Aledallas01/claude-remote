@@ -19,6 +19,7 @@ Options:
   --port <n>            Local port (default 3721; saved)
   --host <addr>         Bind address (default 127.0.0.1; use 0.0.0.0 for LAN access; saved)
   --no-tunnel           Do not start the Cloudflare quick tunnel (LAN / local use)
+  --public-url <url>    You expose the agent yourself (own tunnel/proxy): print the link with this URL
   --web <url>           Web UI base URL used in the connection link (saved)
   --hook-wait <sec>     How long a terminal session waits for a web answer (saved)
   --install-hooks       Add Claude Code hooks (~/.claude/settings.json) and exit
@@ -38,6 +39,7 @@ function parseArgs(argv) {
       case '--port': out.port = Number(next()); break;
       case '--host': out.host = String(next()); break;
       case '--no-tunnel': out.tunnel = false; break;
+      case '--public-url': out.publicUrl = String(next()); break;
       case '--web': out.web = String(next()); break;
       case '--hook-wait': out.hookWait = Number(next()); break;
       case '--install-hooks': out.installHooks = true; break;
@@ -187,7 +189,16 @@ async function main() {
   log(`listening on http://${cfg.host}:${cfg.port}  (sessions indexed: ${server.store.listSessions().length})`);
 
   const localBase = `ws://${cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host}:${cfg.port}`;
-  if (!useTunnel) {
+  if (args.publicUrl) {
+    // The user fronts the agent with their own tunnel / reverse proxy (named Cloudflare tunnel,
+    // Tailscale Funnel, ngrok, ...). We only print the link.
+    const pub = args.publicUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+    if (!/^wss?:\/\//.test(pub)) {
+      console.error('--public-url must be an http(s):// or ws(s):// URL');
+      process.exit(1);
+    }
+    printLink(cfg, pub, 'REMOTE ACCESS (your own tunnel)');
+  } else if (!useTunnel) {
     printLink(cfg, localBase, 'LOCAL ACCESS');
   } else {
     log('starting Cloudflare quick tunnel...');
@@ -197,6 +208,7 @@ async function main() {
         const wsBase = url.replace(/^http/, 'ws');
         log(`tunnel ready: ${url}`);
         printLink(cfg, wsBase, 'REMOTE ACCESS');
+        console.log('(a fresh tunnel address can take up to a minute to resolve; just retry if the page cannot connect at first)');
         server.broadcast({ type: 'tunnel', url: wsBase });
       },
       onDown: () => server.broadcast({ type: 'tunnel', url: null }),

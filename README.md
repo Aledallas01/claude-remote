@@ -54,6 +54,8 @@ page stores it in `localStorage` only if you tick *Remember on this device*.
 node src/index.js [options]
   --port <n>          local port (default 3721)
   --no-tunnel         LAN / same-PC use only, no Cloudflare tunnel
+  --public-url <url>  you expose the agent yourself (named Cloudflare tunnel, Tailscale Funnel,
+                      ngrok, reverse proxy…): the link is printed with this address
   --host 0.0.0.0      also listen on your LAN interfaces (use with --no-tunnel)
   --web <url>         web UI base URL used in the printed link (default: the hosted one)
   --hook-wait <sec>   how long a terminal session waits for a web answer (default 180)
@@ -126,6 +128,19 @@ cd web && npm install && npm run dev                           # UI on http://lo
 
 Deploy the UI with the Vercel CLI from `web/` (`vercel --prod`) or import the repository in Vercel
 with `web` as the root directory. Then point your agent at your deployment with `--web https://your-app.vercel.app`.
+
+## Troubleshooting
+
+- **The page says "Disconnected" right after the agent started.** A fresh `*.trycloudflare.com`
+  name can take up to a minute to propagate; retry. Some home routers and ISP / parental DNS
+  filters block `trycloudflare.com` entirely (the tunnel itself is fine: the name resolves over
+  DNS-over-HTTPS but not through the router). Use your phone's mobile data, enable secure DNS
+  in the browser, or expose the agent with a tunnel of your own and pass `--public-url`.
+- **"Claude Code is not logged in".** The agent starts Claude with the credentials of the `claude`
+  CLI. If you only ever used the desktop app, run `claude login` once in a terminal.
+- **Hooks do nothing.** Run `node src/index.js --install-hooks`, then start a *new* Claude Code
+  session (hooks are read at session start). The agent must be running and a browser connected,
+  otherwise prompts stay in the terminal by design.
 
 ## Limitations
 
