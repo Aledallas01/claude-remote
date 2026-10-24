@@ -49,6 +49,7 @@ export class AgentServer {
     this.store = new TranscriptStore();
     this.hub = new RequestHub();
     this.states = new Map(); // sessionId -> { status, source, cwd, updatedAt }
+    this.queues = new Map(); // sessionId -> [{ text, ts }] messages waiting to be delivered through hooks
     this.clients = new Set(); // authenticated sockets
     this.failures = new Map(); // ip -> [timestamps]
     this.webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
@@ -158,6 +159,7 @@ export class AgentServer {
       out = await handleHookEvent(event, payload, {
         hub: this.hub,
         states: this.states,
+        queues: this.queues,
         emit: (type, p) => this.onRunnerEvent(type, p),
         clientCount: () => this.clients.size,
         cfg: this.cfg,
@@ -225,6 +227,7 @@ export class AgentServer {
             states: this.statesList(),
             pending: this.hub.list(),
             runners: this.runners.list(),
+            queued: this.queuedCounts(),
           });
         } else {
           this.recordFailure(ip);
@@ -270,6 +273,20 @@ export class AgentServer {
     return [...this.states.entries()].map(([sessionId, s]) => ({ sessionId, ...s }));
   }
 
+  queuedCounts() {
+    const out = {};
+    for (const [id, q] of this.queues) if (q.length) out[id] = q.length;
+    return out;
+  }
+
+  // A session that hooks reported as open in another client recently (and not ended).
+  isLiveElsewhere(sessionId) {
+    const s = this.states.get(sessionId);
+    if (!s || s.source !== 'hook' || s.status === 'ended') return false;
+    const age = Date.now() - new Date(s.updatedAt).getTime();
+    return age < 12 * 60 * 60 * 1000;
+  }
+
   async handleClientMessage(ws, msg, subs) {
     const { type, reqId } = msg;
     switch (type) {
@@ -311,6 +328,18 @@ export class AgentServer {
           if (!UUID_RE.test(sessionId)) throw new Error('invalid session id');
           const meta = this.store.getMeta(sessionId) || (await this.store.findFile(sessionId), this.store.getMeta(sessionId));
           if (meta?.cwd) cwd = meta.cwd;
+          // Session open in a terminal / the desktop app: deliver through the hooks (no credentials
+          // needed, and the terminal owns the conversation so the SDK must not resume it).
+          if (this.isLiveElsewhere(sessionId)) {
+            const q = this.queues.get(sessionId) || [];
+            q.push({ text, ts: new Date().toISOString() });
+            this.queues.set(sessionId, q);
+            this.broadcast({ type: 'queued', sessionId, count: q.length });
+            return this.send(ws, { type: 'ok', reqId, sessionId, delivery: 'hook', queued: q.length });
+          }
+        }
+        if (this.loggedIn === false) {
+          throw new Error('Claude Code CLI is not logged in on the PC: run "claude login" once to start sessions from here. Messages to sessions running on the PC are delivered through the hooks instead.');
         }
         if (!cwd) throw new Error('a project folder (cwd) is required for a new session');
         if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(`folder not found on this PC: ${cwd}`);
@@ -338,6 +367,11 @@ export class AgentServer {
         if (runner) await runner.interrupt();
         return this.send(ws, { type: 'ok', reqId });
       }
+      case 'unqueue': {
+        const id = String(msg.sessionId || '');
+        if (this.queues.delete(id)) this.broadcast({ type: 'queued', sessionId: id, count: 0 });
+        return this.send(ws, { type: 'ok', reqId });
+      }
       case 'respond': {
         const id = String(msg.requestId || '');
         const answer = {
@@ -359,6 +393,7 @@ export class AgentServer {
           states: this.statesList(),
           pending: this.hub.list(),
           runners: this.runners.list(),
+          queued: this.queuedCounts(),
         });
       default:
         throw new Error(`unknown message type: ${type}`);

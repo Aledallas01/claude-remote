@@ -7,7 +7,7 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, onSend, onInterrupt, onAnswer }: {
+export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, queued = 0, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
   meta?: SessionMeta;
   isNew?: boolean;
@@ -20,10 +20,13 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
   status: 'idle' | 'running' | 'waiting' | 'ended';
   source?: 'sdk' | 'hook';
   pending: PendingRequest[];
+  queued?: number;
   onSend: (text: string, permissionMode: string, cwd?: string) => Promise<void>;
   onInterrupt: () => void;
+  onUnqueue?: () => void;
   onAnswer: (req: PendingRequest, a: Answer) => void;
 }) {
+  const liveElsewhere = source === 'hook' && !isNew;
   const [text, setText] = useState('');
   const [mode, setMode] = useState<(typeof MODES)[number]>(() => {
     try {
@@ -147,6 +150,19 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
       </div>
 
       <div className="composer">
+        {liveElsewhere && <div className="muted small">{status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
+        {queued > 0 && (
+          <div className="queued">
+            <span>
+              {queued} {t('queuedBanner')}
+            </span>
+            {onUnqueue && (
+              <button className="btn ghost compact" onClick={onUnqueue}>
+                {t('cancelQueue')}
+              </button>
+            )}
+          </div>
+        )}
         <textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder={isNew ? t('composerPlaceholderNew') : t('composerPlaceholder')} />
         <div className="composer-row">
           <label className="muted small">
@@ -158,7 +174,7 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
             </select>
           </label>
           <span className="spacer" />
-          {status === 'running' && !isNew && (
+          {status === 'running' && !isNew && !liveElsewhere && (
             <button className="btn danger" onClick={onInterrupt}>
               {t('stop')}
             </button>

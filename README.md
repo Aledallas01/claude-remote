@@ -23,13 +23,14 @@ messages, from any browser or phone, while Claude keeps running on your own PC.
 | **Browse every session** | All transcripts under `~/.claude/projects`, grouped by project, searchable, with live updates while Claude works. |
 | **Approve / deny tool calls** | Permission prompts (Bash, Edit, Write, MCP tools…) appear as cards: *Allow*, *Allow always*, *Deny with a reason*. |
 | **Answer questions** | `AskUserQuestion` prompts are rendered with their options, multi-select and a free-text "Other". |
-| **Send messages** | Continue any session or start a new one in a project folder, with *Ask me* / *Auto-accept edits* / *Plan* permission modes. Stop a running turn at any time. |
-| **Sessions you run elsewhere** | With the optional hooks, sessions started in a terminal or in the Claude desktop app show up live and their prompts can be answered from the web too. |
+| **Send messages** | To a session running on the PC: the message is handed to Claude through the hooks as soon as the current turn ends (no credentials involved). To an idle session, or to start a new one in a project folder: the agent runs Claude itself, with *Ask me* / *Auto-accept edits* / *Plan* permission modes and a Stop button. |
+| **Sessions you run elsewhere** | With the hooks, sessions started in a terminal or in the Claude desktop app show up live, their prompts can be answered from the web and they receive your messages. |
 
 ## Quick start (Windows)
 
-1. Install [Node.js 18+](https://nodejs.org) and make sure Claude Code is logged in
-   (run `claude` once in a terminal and complete `/login`, or `claude login`).
+1. Install [Node.js 18+](https://nodejs.org). No login or API key is needed: the agent works
+   with the Claude Code you already use. (Only *starting new sessions from the web* needs the
+   `claude` CLI to be logged in; see Troubleshooting.)
 2. Clone and start the agent:
 
    ```bat
@@ -75,7 +76,13 @@ The repository has two parts.
 
 - **Transcripts.** Reads and watches `~/.claude/projects/**/*.jsonl`, the files Claude Code itself
   writes, so every session is visible, including old ones, with no extra logging.
-- **Agent SDK.** Messages you send from the web go through the
+- **Messages to running sessions (hooks).** A message sent from the web to a session that is open
+  in a terminal or in the desktop app is queued on the agent. When that session's `Stop` hook
+  fires (Claude finished its turn), the agent answers `{"decision":"block","reason":<your
+  message>}` and Claude continues with your text as the next instruction, inside the same
+  session and with its own login. If you type in the terminal first, the queued text is attached
+  to your prompt as additional context instead. No credentials ever pass through the agent.
+- **Agent SDK (new or idle sessions).** Messages to sessions nobody has open go through the
   [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), which drives the Claude Code
   already installed on the PC (or the copy bundled with the SDK). It therefore uses your existing
   Claude login, and the session is a normal Claude Code session: same `CLAUDE.md`, MCP servers,
@@ -136,24 +143,27 @@ with `web` as the root directory. Then point your agent at your deployment with 
   filters block `trycloudflare.com` entirely (the tunnel itself is fine: the name resolves over
   DNS-over-HTTPS but not through the router). Use your phone's mobile data, enable secure DNS
   in the browser, or expose the agent with a tunnel of your own and pass `--public-url`.
-- **"Claude Code is not logged in".** The agent starts Claude with the credentials of the `claude`
-  CLI. If you only ever used the desktop app, run `claude login` once in a terminal.
+- **"The claude CLI is not logged in".** Only relevant when you start a *new* session (or continue
+  an idle one) from the web: for that the agent launches Claude with the `claude` CLI's
+  credentials. Viewing sessions, answering prompts and messaging sessions that are open on the
+  PC never need it. If you only ever used the desktop app and want this too, run `claude login`
+  once in a terminal.
 - **Hooks do nothing.** Run `node src/index.js --install-hooks`, then start a *new* Claude Code
   session (hooks are read at session start). The agent must be running and a browser connected,
   otherwise prompts stay in the terminal by design.
 
 ## Limitations
 
-- Sending a message to a session that is currently open in a terminal is not possible (the terminal
-  owns that conversation); you can still read it and answer its prompts via hooks. Start a new session
-  from the web, or continue a session that is idle.
+- A message to a session open in a terminal is delivered when Claude next stops or when you next
+  type there (hooks only fire on those events). If that session is sitting idle at the prompt,
+  nothing happens until one of the two occurs.
 - Images and files cannot be attached from the web yet.
 - Quick tunnel URLs are temporary: when you restart the agent you get a new link (the token stays the same).
 
 ## Italiano: avvio rapido
 
-1. Installa [Node.js 18+](https://nodejs.org) e assicurati che Claude Code abbia fatto il login
-   (`claude login` in un terminale, una sola volta).
+1. Installa [Node.js 18+](https://nodejs.org). Non servono login né API key: l'agent usa il Claude
+   Code che già usi (solo per *avviare nuove sessioni dal sito* la CLI `claude` deve essere loggata).
 2. `git clone https://github.com/Aledallas01/claude-remote`, entra in `claude-remote\agent` e fai
    doppio clic su `start.bat` (su macOS/Linux: `npm install && npm start`).
 3. Alla prima esecuzione rispondi `Y` per installare gli hook di Claude Code: così anche le sessioni

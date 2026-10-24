@@ -137,18 +137,36 @@ export async function handleHookEvent(event, payload, ctx) {
     case 'SessionEnd':
       if (sessionId) {
         ctx.states.delete(sessionId);
+        if (ctx.queues?.delete(sessionId)) ctx.emit('queued', { sessionId, count: 0 });
         ctx.hub.cancelForSession(sessionId, 'session_ended');
         ctx.emit('status', { sessionId, status: 'ended', source: 'hook', cwd });
       }
       return {};
-    case 'UserPromptSubmit':
+    case 'UserPromptSubmit': {
       touch('running');
       ctx.emit('prompt_submitted', { sessionId, cwd, prompt: String(payload.prompt || '').slice(0, 2000) });
-      return {};
-    case 'Stop':
-      touch('idle');
+      // Messages sent from the web while the user was away ride along as extra context.
+      const queued = takeQueued(ctx, sessionId);
+      if (!queued) return {};
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: `The user also sent the following message(s) from Claude Remote (web) before this prompt. Treat them as part of the user's instructions:\n\n${queued}`,
+        },
+      };
+    }
+    case 'Stop': {
       ctx.emit('stopped', { sessionId, cwd, lastAssistantMessage: String(payload.last_assistant_message || '').slice(0, 4000) });
+      // A message queued from the web is delivered as the next instruction: blocking the stop
+      // with a reason makes Claude continue with that text, using the session's own credentials.
+      const queued = takeQueued(ctx, sessionId);
+      if (queued) {
+        touch('running');
+        return { decision: 'block', reason: `The user sent this message from Claude Remote (web). Continue with it as the next instruction:\n\n${queued}` };
+      }
+      touch('idle');
       return {};
+    }
     case 'Notification':
       ctx.emit('notification', {
         sessionId,
@@ -167,6 +185,17 @@ export async function handleHookEvent(event, payload, ctx) {
     default:
       return {};
   }
+}
+
+// Pops every message queued for the session and returns them as one text (or '' when none).
+function takeQueued(ctx, sessionId) {
+  if (!sessionId || !ctx.queues) return '';
+  const q = ctx.queues.get(sessionId);
+  if (!q || !q.length) return '';
+  ctx.queues.delete(sessionId);
+  ctx.emit('queued', { sessionId, count: 0 });
+  ctx.emit('delivered', { sessionId, count: q.length });
+  return q.map((m) => m.text).join('\n\n---\n\n');
 }
 
 async function permissionFromHook(payload, sessionId, cwd, touch, ctx) {

@@ -31,10 +31,13 @@ interface State {
   draft: Draft | null;
   toasts: { id: number; text: string; kind?: 'info' | 'error' }[];
   tunnel?: string | null;
+  queued: Record<string, number>;
 }
 
 type Action =
-  | { type: 'hello'; agent: AgentInfo; sessions: SessionMeta[]; states: SessionState[]; pending: PendingRequest[] }
+  | { type: 'hello'; agent: AgentInfo; sessions: SessionMeta[]; states: SessionState[]; pending: PendingRequest[]; queued?: Record<string, number> }
+  | { type: 'queued'; sessionId: string; count: number }
+  | { type: 'delivered'; sessionId: string }
   | { type: 'sessions'; sessions: SessionMeta[] }
   | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string }
   | { type: 'request'; request: PendingRequest }
@@ -89,7 +92,20 @@ function reducer(state: State, a: Action): State {
     case 'hello': {
       const states: Record<string, SessionState> = {};
       for (const s of a.states) states[s.sessionId] = s;
-      return { ...state, agent: a.agent, sessions: a.sessions, states, pending: a.pending };
+      return { ...state, agent: a.agent, sessions: a.sessions, states, pending: a.pending, queued: a.queued || {} };
+    }
+    case 'queued': {
+      const queued = { ...state.queued };
+      if (a.count > 0) queued[a.sessionId] = a.count;
+      else delete queued[a.sessionId];
+      return { ...state, queued };
+    }
+    case 'delivered': {
+      const prev = state.convs[a.sessionId];
+      if (!prev) return state;
+      // The queued (optimistic) user messages reached Claude: show them as regular messages.
+      const messages = prev.messages.map((m) => (m.optimistic && m.role === 'user' ? { ...m, optimistic: false } : m));
+      return { ...state, convs: { ...state.convs, [a.sessionId]: { ...prev, messages } } };
     }
     case 'sessions':
       return { ...state, sessions: a.sessions };
@@ -163,7 +179,7 @@ function reducer(state: State, a: Action): State {
   }
 }
 
-const initialState: State = { agent: null, sessions: [], states: {}, pending: [], convs: {}, current: null, draft: null, toasts: [] };
+const initialState: State = { agent: null, sessions: [], states: {}, pending: [], convs: {}, current: null, draft: null, toasts: [], queued: {} };
 
 export default function App() {
   const [lang, setLangState] = useState<Lang>(detectLang);
@@ -209,7 +225,7 @@ export default function App() {
     const offMsg = client.onMessage((m) => {
       switch (m.type) {
         case 'hello':
-          dispatch({ type: 'hello', agent: m.agent, sessions: m.sessions, states: m.states, pending: m.pending });
+          dispatch({ type: 'hello', agent: m.agent, sessions: m.sessions, states: m.states, pending: m.pending, queued: m.queued });
           // Re-subscribe to the open conversation after a reconnect.
           {
             const cur = stateRef.current.current;
@@ -253,6 +269,15 @@ export default function App() {
           break;
         case 'tunnel':
           dispatch({ type: 'tunnel', url: m.url });
+          break;
+        case 'queued':
+          if (m.sessionId) dispatch({ type: 'queued', sessionId: m.sessionId, count: Number(m.count) || 0 });
+          break;
+        case 'delivered':
+          if (m.sessionId) {
+            dispatch({ type: 'delivered', sessionId: m.sessionId });
+            dispatch({ type: 'toast', text: t('delivered') });
+          }
           break;
         default:
           break;
@@ -456,8 +481,10 @@ export default function App() {
             status={currentState?.status || 'idle'}
             source={currentState?.source}
             pending={currentPending}
+            queued={state.queued[state.current] || 0}
             onSend={sendMessage}
             onInterrupt={interrupt}
+            onUnqueue={() => client.request({ type: 'unqueue', sessionId: state.current }).catch(() => {})}
             onAnswer={answer}
           />
         ) : (
