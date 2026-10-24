@@ -109,7 +109,8 @@ function localAddresses() {
       const ip = a.address;
       if (/^169\.254\./.test(ip)) continue; // link-local: never reachable from a phone
       const tailscale = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) || /tailscale/i.test(name);
-      const virtual = /vethernet|virtualbox|vmware|hyper-v|docker|wsl|loopback/i.test(name);
+      // Virtual adapters are not reachable from a phone; VirtualBox host-only defaults to 192.168.56.x.
+      const virtual = /vethernet|virtualbox|vmware|hyper-v|docker|wsl|loopback/i.test(name) || /^192\.168\.56\./.test(ip);
       out.push({ name, ip, tailscale, virtual });
     }
   }
