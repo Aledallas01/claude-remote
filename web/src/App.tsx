@@ -396,11 +396,12 @@ export default function App() {
   };
 
   if (!conn || (!everConnected && status !== 'connecting')) {
+    const expected = statusDetail?.match(/expected=(\d+)/)?.[1];
     const authError =
       status === 'unauthorized'
         ? statusDetail === 'too many failed attempts'
           ? t('tooManyAttempts')
-          : `${t('unauthorized')} ${t('tokenLengthHint').replace('{n}', String(conn?.token.length ?? 0))}`
+          : `${t('unauthorized')} ${t('tokenLengthHint').replace('{n}', String(conn?.token.length ?? 0)).replace('{m}', expected || '?')}`
         : undefined;
     return <Connect t={t} lang={lang} setLang={setLang} initial={conn} status={status} error={authError ?? (statusDetail && status === 'disconnected' && conn ? `${t('disconnected')} (${statusDetail})` : undefined)} onConnect={onConnect} onForget={onForget} />;
   }

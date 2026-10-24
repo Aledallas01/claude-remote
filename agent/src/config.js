@@ -22,8 +22,24 @@ export function configPath() {
   return path.join(configDir(), 'config.json');
 }
 
+// Letters and digits only: survives copy/paste through messaging apps and phone keyboards,
+// which like to turn '-' into dashes. 32 bytes -> 52 chars of base32 (~256 bits).
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
 function randomToken(bytes = 32) {
-  return crypto.randomBytes(bytes).toString('base64url');
+  const buf = crypto.randomBytes(bytes);
+  let bits = 0;
+  let value = 0;
+  let out = '';
+  for (const byte of buf) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += B32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
 }
 
 const DEFAULTS = {

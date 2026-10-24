@@ -34,6 +34,14 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+// Phones and messaging apps turn '-' into en/em dashes and add invisible characters.
+function normalizeToken(t) {
+  return String(t)
+    .replace(/[​-‍﻿\s]/g, '')
+    .replace(/[‐-―−⁃﹘﹣－]/g, '-')
+    .replace(/[‗＿]/g, '_');
+}
+
 function safeEqual(a, b) {
   const ba = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -215,7 +223,7 @@ export class AgentServer {
       }
       if (!msg || typeof msg !== 'object') return;
       if (!authed) {
-        if (msg.type === 'auth' && typeof msg.token === 'string' && safeEqual(msg.token, this.cfg.token)) {
+        if (msg.type === 'auth' && typeof msg.token === 'string' && safeEqual(normalizeToken(msg.token), this.cfg.token)) {
           authed = true;
           clearTimeout(authTimer);
           this.clients.add(ws);
@@ -233,7 +241,7 @@ export class AgentServer {
           this.recordFailure(ip);
           const got = typeof msg.token === 'string' ? msg.token : '';
           this.log(`auth failed from ${ip} (${msg.type === 'auth' ? `token length ${got.length}, expected ${this.cfg.token.length}${got.length === this.cfg.token.length ? ', same length but different' : ''}` : `first message was "${msg.type}"`})`);
-          ws.close(4003, 'unauthorized');
+          ws.close(4003, `unauthorized expected=${this.cfg.token.length}`);
         }
         return;
       }

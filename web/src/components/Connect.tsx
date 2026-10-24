@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Connection } from '../types';
 import type { T, Lang } from '../i18n';
-import { normalizeAgentUrl, parseLink } from '../agent';
+import { normalizeAgentUrl, normalizeToken, parseLink } from '../agent';
 
 export function Connect({ t, lang, setLang, initial, status, error, onConnect, onForget }: {
   t: T;
@@ -21,7 +21,7 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const c = parsed || (url && token ? { url: normalizeAgentUrl(url), token: token.trim() } : null);
+    const c = parsed || (url && token ? { url: normalizeAgentUrl(normalizeToken(url)), token: normalizeToken(token) } : null);
     if (c) onConnect(c, remember);
   };
 
@@ -43,7 +43,7 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
           <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…/#a=wss://…&t=…" autoComplete="off" spellCheck={false} />
           {parsed && (
             <span className="muted small">
-              ✓ {parsed.url} · token {parsed.token.length} {parsed.token.length === 43 ? '✓' : '⚠'}
+              ✓ {parsed.url} · token: {parsed.token.length} {t('chars')}
             </span>
           )}
         </label>

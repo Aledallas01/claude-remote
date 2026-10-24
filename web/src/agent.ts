@@ -88,7 +88,7 @@ export class AgentClient {
       }
       this.waiting.clear();
       if (ev.code === 4003 || ev.code === 4029) {
-        this.setStatus('unauthorized', ev.code === 4029 ? 'too many failed attempts' : 'invalid token');
+        this.setStatus('unauthorized', ev.code === 4029 ? 'too many failed attempts' : ev.reason || 'invalid token');
         return;
       }
       this.setStatus('disconnected', ev.reason || `code ${ev.code}`);
@@ -151,6 +151,15 @@ export class AgentClient {
 
 const KEY = 'claude-remote:connection';
 
+// Messaging apps and phone keyboards like to replace '-' with en/em dashes and '_' with
+// look-alikes, and may add zero-width characters. Undo that: the token only uses [A-Za-z0-9_-].
+export function normalizeToken(t: string): string {
+  return t
+    .replace(/[​-‍﻿\s]/g, '')
+    .replace(/[‐-―−⁃﹘﹣－]/g, '-')
+    .replace(/[‗＿]/g, '_');
+}
+
 // Some scanners / messaging apps re-encode or wrap links; decode until stable.
 function deepDecode(s: string): string {
   let cur = s;
@@ -177,8 +186,8 @@ export function parseLink(input: string): Connection | null {
   if (!/(^|&)a=/.test(hash) && /%26a%3D|%23a%3D/i.test(hash)) hash = deepDecode(hash).replace(/^.*#/, '');
   const p = new URLSearchParams(hash);
   const a = p.get('a') ? deepDecode(p.get('a')!.trim()) : '';
-  const t = (p.get('t') || '').trim();
-  if (a && t && /^wss?:\/\//.test(a)) return { url: a.replace(/\/+$/, ''), token: t, name: p.get('n') || undefined };
+  const t = normalizeToken(p.get('t') || '');
+  if (a && t && /^wss?:\/\//.test(a)) return { url: normalizeToken(a).replace(/\/+$/, ''), token: t, name: p.get('n') || undefined };
   return null;
 }
 
