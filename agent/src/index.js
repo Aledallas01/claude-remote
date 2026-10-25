@@ -34,6 +34,8 @@ Options:
   --uninstall-hooks     Remove the hooks and exit
   --no-hooks            Start without asking about hooks
   --rotate-token        Generate a new access token (old links stop working)
+  --link                Print the connection link(s) for the saved configuration and exit
+                        (handy when the agent runs in the background, see install-autostart.bat)
   --show-config         Print config file location and exit
   -h, --help            Show this help
 `;
@@ -56,6 +58,7 @@ function parseArgs(argv) {
       case '--no-hooks': out.noHooks = true; break;
       case '--rotate-token': out.rotate = true; break;
       case '--show-config': out.showConfig = true; break;
+      case '--link': out.link = true; break;
       case '-h': case '--help': out.help = true; break;
       default: out._.push(a);
     }
@@ -154,6 +157,12 @@ async function main() {
   if (args.rotate) {
     rotateToken(cfg);
     log('access token rotated. Previous links no longer work.');
+  }
+  if (args.link) {
+    if (cfg.publicUrl) printLink(cfg, cfg.publicUrl, 'REMOTE ACCESS (your own stable URL)', { self: true });
+    if (cfg.host === '0.0.0.0' || cfg.host === '::') printLocalLinks(cfg);
+    if (!cfg.publicUrl) console.log('(the Cloudflare quick tunnel address changes at every start: see agent.log for the current one)');
+    return;
   }
   if (args.web) {
     try {
@@ -258,6 +267,21 @@ async function main() {
   }
   server.startHeartbeat();
   log(`listening on http://${cfg.host}:${cfg.port}  (sessions indexed: ${server.store.listSessions().length})`);
+  // pid file: lets stop.bat / autostart.ps1 find the background instance.
+  const pidFile = path.join(path.dirname(configPath()), 'agent.pid');
+  try {
+    fs.writeFileSync(pidFile, String(process.pid));
+  } catch {
+    /* not essential */
+  }
+  const removePid = () => {
+    try {
+      if (fs.readFileSync(pidFile, 'utf8').trim() === String(process.pid)) fs.unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePid);
 
   const localBase = `ws://${cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host}:${cfg.port}`;
   if (cfg.publicUrl) {

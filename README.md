@@ -50,6 +50,19 @@ The link looks like `https://claude-remote-three.vercel.app/#a=wss://…trycloud
 Everything after `#` never leaves your browser (URL fragments are not sent to web servers), and the
 page stores it in `localStorage` only if you tick *Remember on this device*.
 
+### Run in the background at login (Windows)
+
+```
+agent\install-autostart.bat     starts the agent now with no window, and at every login
+agent\stop.bat                  stops the background agent
+agent\uninstall-autostart.bat   removes the Startup shortcut and stops the agent
+node src\index.js --link        prints the connection link(s) again
+```
+
+This adds a shortcut to your own Startup folder (`shell:startup`), nothing system-wide and no
+administrator rights. Output goes to `agent\agent.log`. Run `start.bat` once first, so the hooks
+get installed and the configuration (port, public URL) is saved.
+
 ### Agent options
 
 ```
