@@ -24,7 +24,8 @@ messages, from any browser or phone, while Claude keeps running on your own PC.
 | **Approve / deny tool calls** | Permission prompts (Bash, Edit, Write, MCP tools…) appear as cards: *Allow*, *Allow always*, *Deny with a reason*. |
 | **Answer questions** | `AskUserQuestion` prompts are rendered with their options, multi-select and a free-text "Other". |
 | **Send messages** | To a session running on the PC: the message is handed to Claude through the hooks as soon as the current turn ends (no credentials involved). To an idle session, or to start a new one in a project folder: the agent runs Claude itself, with *Ask me* / *Auto-accept edits* / *Plan* permission modes and a Stop button. |
-| **Sessions you run elsewhere** | With the hooks, sessions started in a terminal or in the Claude desktop app show up live, their prompts can be answered from the web and they receive your messages. |
+| **Sessions you run elsewhere** | With the hooks, sessions started in a terminal or in the Claude desktop app show up live, their prompts can be answered from the web and they receive your messages. After a turn ends in a session you are using from the web, the Stop hook keeps it reachable for `stopHoldSeconds` (default 120): a message sent in that window reaches Claude immediately, otherwise it is delivered when the session next runs. |
+| **Notifications** | Tap the bell once: permission prompts and questions arrive as push notifications, also with the app in the background or closed. Tapping one opens the right chat on that request. On iPhone add the page to the Home Screen first (Share → Add to Home Screen). |
 
 ## Quick start (Windows)
 
@@ -124,7 +125,14 @@ in `web/`; the agent serves `web/dist` when present).
   screenshots of the QR code, and prefer *Ask me* mode when working remotely.
 - **Hook timeouts.** While a web client is connected, a permission prompt of a terminal session waits up to
   `--hook-wait` seconds (default 180) for a web answer before falling back to the terminal. Without
-  any connected web client it does not wait at all.
+  any connected web client it does not wait at all. Likewise the Stop hook only holds a session
+  (`stopHoldSeconds`) while a web client is connected and that session was used from the web in the
+  last hour; it returns at once when the last client leaves.
+- **Push notifications.** The agent generates a VAPID key pair once (kept in its config file) and
+  stores the browsers' push subscriptions next to it. Each notification goes through the browser
+  vendor's push service (Apple, Google, Mozilla) as an encrypted payload holding only the tool name,
+  the session title and one line of context, never the conversation. *Forget this PC* in the web UI
+  removes the device's subscription.
 
 Found a vulnerability? Please open a private security advisory on GitHub rather than a public issue.
 
