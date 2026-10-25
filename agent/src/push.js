@@ -20,7 +20,10 @@ export class PushStore {
       cfg.vapidPrivateKey = keys.privateKey;
       saveConfig(cfg);
     }
-    webpush.setVapidDetails('mailto:claude-remote@localhost', cfg.vapidPublicKey, cfg.vapidPrivateKey);
+    // The VAPID subject identifies the sender to the push service. Apple rejects (403) subjects
+    // that are not a real mailto: address or an https: URL, so the project page is the default.
+    const subject = typeof cfg.pushContact === 'string' && /^(mailto:|https:\/\/)/.test(cfg.pushContact) ? cfg.pushContact : 'https://github.com/Aledallas01/claude-remote';
+    webpush.setVapidDetails(subject, cfg.vapidPublicKey, cfg.vapidPrivateKey);
     this.subs = this.load();
   }
 
@@ -90,7 +93,8 @@ export class PushStore {
         this.subs[i] = null;
         dirty = true;
       } else {
-        this.log(`push: send failed (${code || r.reason?.message || 'unknown'})`);
+        const detail = String(r.reason?.body || '').replace(/\s+/g, ' ').slice(0, 160);
+        this.log(`push: send failed (${code || r.reason?.message || 'unknown'})${detail ? ` ${detail}` : ''}`);
       }
     });
     if (dirty) {

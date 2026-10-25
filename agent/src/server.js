@@ -125,9 +125,11 @@ export class AgentServer {
       this.push = null;
     }
     this.hub.on('created', (request) => {
+      log(`request ${request.id.slice(0, 8)}: ${request.kind} ${request.toolName} for ${String(request.sessionId || '').slice(0, 8)} (${this.clients.size} client(s), push to ${this.push?.count || 0})`);
       this.broadcast({ type: 'request', request });
       this.pushForRequest(request).catch((err) => log(`push: ${err.message}`));
     });
+    this.hub.on('resolved', (info) => log(`request ${String(info.id || '').slice(0, 8)}: ${info.reason || 'resolved'}`));
     this.hub.on('resolved', (info) => this.broadcast({ type: 'request_resolved', ...info }));
     this.store.on('messages', ({ sessionId, messages }) => {
       for (const message of messages) this.broadcast({ type: 'message', sessionId, message, live: false });
