@@ -113,7 +113,12 @@ function reducer(state: State, a: Action): State {
     case 'status': {
       const states = { ...state.states };
       if (a.status === 'ended') delete states[a.sessionId];
-      else states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || states[a.sessionId]?.cwd || '', held: !!a.held, updatedAt: new Date().toISOString() };
+      else {
+        const prev = states[a.sessionId];
+        // updatedAt marks when the current status began (drives the "working for …" timer).
+        const updatedAt = prev && prev.status === a.status ? prev.updatedAt : new Date().toISOString();
+        states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || prev?.cwd || '', held: !!a.held, updatedAt };
+      }
       return { ...state, states };
     }
     case 'request':
@@ -566,6 +571,7 @@ export default function App() {
         {state.current === 'new' && state.draft ? (
           <Chat
             t={t}
+            lang={lang}
             key="new"
             isNew
             draftCwd={state.draft.cwd}
@@ -583,8 +589,10 @@ export default function App() {
         ) : state.current && currentMeta ? (
           <Chat
             t={t}
+            lang={lang}
             key={state.current}
             meta={currentMeta}
+            statusSince={currentState?.updatedAt}
             messages={currentConv?.messages || []}
             partial={currentConv?.partial || ''}
             loaded={!!currentConv?.loaded}

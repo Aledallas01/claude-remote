@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Msg, PendingRequest, Project, SessionMeta } from '../types';
-import type { T } from '../i18n';
-import { collectResults, groupMessages, MessageGroup } from './Messages';
+import type { T, Lang } from '../i18n';
+import { collectResults, groupMessages, MessageGroup, planSnapshots } from './Messages';
 import { RequestCard, type Answer } from './Requests';
 import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, held = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, statusSince, source, held = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
+  lang: Lang;
+  statusSince?: string; // when the current status began (for the "working for 1m 20s" line)
   meta?: SessionMeta;
   isNew?: boolean;
   hookOnly?: boolean; // the PC cannot start Claude from here (no CLI login): messages always go through the hooks
@@ -46,7 +48,22 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
 
   const groups = useMemo(() => groupMessages(messages), [messages]);
   const results = useMemo(() => collectResults(messages), [messages]);
+  const plans = useMemo(() => planSnapshots(messages), [messages]);
   const partialHtml = useMemo(() => (partial ? renderMarkdown(partial) : ''), [partial]);
+
+  // Elapsed time of the current turn, ticking once a second while Claude works.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (status !== 'running') return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+  const elapsed = (() => {
+    const start = statusSince ? new Date(statusSince).getTime() : NaN;
+    if (Number.isNaN(start)) return '';
+    const s = Math.max(0, Math.floor((now - start) / 1000));
+    return s >= 60 ? `${Math.floor(s / 60)}min ${s % 60}s` : `${s}s`;
+  })();
 
   useEffect(() => {
     const el = scroller.current;
@@ -136,26 +153,22 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
         {!loaded && !isNew && <div className="muted small pad">{t('loadingHistory')}</div>}
         {truncated && <div className="muted small pad center">{t('truncated')}</div>}
         {groups.map((g, i) => (
-          <MessageGroup key={g.items[0].uuid || i} group={g} results={results} t={t} />
+          <MessageGroup key={g.items[0].uuid || i} group={g} results={results} plans={plans} t={t} lang={lang} />
         ))}
         {partial && (
           <div className="msg assistant streaming">
-            <div className="bubble">
-              <div className="turn">
-                <span className="mark">⏺</span>
-                <div className="md" dangerouslySetInnerHTML={{ __html: partialHtml }} />
-              </div>
-            </div>
+            <div className="md" dangerouslySetInnerHTML={{ __html: partialHtml }} />
           </div>
         )}
-        {status === 'running' && !partial && pending.length === 0 && (
-          <div className="typing">
-            <span className="mark">⏺</span>
-            <span className="dots">
+        {status === 'running' && pending.length === 0 && (
+          <div className="working">
+            <span className="working-dots" aria-hidden="true">
               <span />
               <span />
               <span />
             </span>
+            <span className="working-text">{t('workingFor')}</span>
+            {elapsed && <span className="working-time">{elapsed}</span>}
           </div>
         )}
         {pending.map((p) => (

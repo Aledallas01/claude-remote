@@ -2,23 +2,26 @@
    warm neutral surfaces, terracotta accent, serif for titles, monospace for tools,
    "⏺" markers for assistant turns and tool calls, "⎿" for their results. */
 :root {
-  --bg: #262624;
-  --bg-2: #1f1e1c;
-  --bg-3: #30302e;
-  --bg-4: #3a3936;
-  --border: #3b3a37;
-  --border-2: #4a4845;
-  --text: #eeece2;
-  --text-2: #d6d3c8;
-  --muted: #9d9a91;
+  /* Neutral dark, like the Claude Code desktop transcript. */
+  --bg: #1c1c1c;
+  --bg-2: #171717;
+  --bg-3: #262626;
+  --bg-4: #303030;
+  --border: #333333;
+  --border-2: #444444;
+  --text: #ededed;
+  --text-2: #cfcfcf;
+  --muted: #8d8d8d;
   --accent: #d97757;
   --accent-2: #e5a084;
   --accent-soft: rgba(217, 119, 87, 0.14);
-  --ok: #6fbf86;
+  --ok: #4fbf6f;
   --warn: #e0b45c;
   --err: #e5534b;
   --info: #88a9db;
-  --user: #3b3a36;
+  --user: #2b2b2b;
+  --diff-add-bg: rgba(79, 191, 111, 0.16);
+  --diff-del-bg: rgba(229, 83, 75, 0.16);
   --radius: 14px;
   --radius-lg: 20px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
@@ -29,23 +32,25 @@
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #faf9f5;
-    --bg-2: #f3f1ea;
-    --bg-3: #ffffff;
-    --bg-4: #ebe8df;
-    --border: #e4e1d7;
-    --border-2: #d2cec2;
-    --text: #2a2a26;
-    --text-2: #4a4843;
-    --muted: #76736b;
+    --bg: #ffffff;
+    --bg-2: #f6f6f6;
+    --bg-3: #f1f1f1;
+    --bg-4: #e8e8e8;
+    --border: #e2e2e2;
+    --border-2: #cfcfcf;
+    --text: #1f1f1f;
+    --text-2: #3d3d3d;
+    --muted: #727272;
     --accent: #c96442;
     --accent-2: #d97757;
     --accent-soft: rgba(201, 100, 66, 0.12);
-    --ok: #3f8f5a;
+    --ok: #2f8f4e;
     --warn: #b5821c;
     --err: #c9372c;
     --info: #3f6fb5;
-    --user: #ece9e0;
+    --user: #f1f1f1;
+    --diff-add-bg: rgba(47, 143, 78, 0.14);
+    --diff-del-bg: rgba(201, 55, 44, 0.12);
     --shadow: 0 10px 30px rgba(60, 50, 30, 0.12);
     color-scheme: light;
   }
@@ -277,7 +282,7 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 /* ---------- chat ---------- */
 .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .chat-head { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
-.chat-title { font: 600 16px/1.3 var(--serif); }
+.chat-title { font: 600 15px/1.3 var(--sans); }
 .chat-head .path { font-family: var(--mono); font-size: 12px; }
 .status { font-size: 12.5px; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--border-2); }
@@ -287,7 +292,7 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .status.waiting::before { background: var(--warn); animation: pulse 1.2s infinite; }
 .status.idle::before { background: var(--ok); }
 .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 18px 20px 12px; display: flex; flex-direction: column; gap: 18px; }
-.scroll > * { width: 100%; max-width: 860px; margin-inline: auto; }
+.scroll > * { width: 100%; max-width: 760px; margin-inline: auto; }
 .new-session { display: flex; flex-direction: column; gap: 10px; }
 .projects { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip {
@@ -308,33 +313,68 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .chip.on { border-color: var(--accent); color: var(--accent-2); background: var(--accent-soft); }
 .chip.missing { opacity: 0.5; text-decoration: line-through; }
 
-/* Messages: user turns in a soft bubble on the right, assistant turns flow in the page
-   with a marker column, like the Claude Code transcript. */
-.msg { display: flex; flex-direction: column; gap: 4px; }
+/* Messages, laid out like the Claude Code desktop transcript: the user's turn is a rounded
+   bubble on the right with a relative time under it; Claude's text flows in the page with
+   no bubble; runs of actions fold into one grey summary line; plans and recaps are cards. */
+.msg { display: flex; flex-direction: column; gap: 6px; }
 .msg.user { align-items: flex-end; }
-.msg-meta { display: flex; gap: 8px; font-size: 11.5px; color: var(--muted); padding: 0 6px; opacity: 0; transition: opacity 0.15s; }
-.msg:hover .msg-meta { opacity: 1; }
+.msg-meta { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .msg.user .bubble {
   background: var(--user);
-  border-radius: 18px 18px 6px 18px;
-  padding: 10px 16px;
-  max-width: min(80%, 640px);
+  border-radius: 14px;
+  padding: 12px 16px;
+  max-width: min(85%, 640px);
   overflow-wrap: anywhere;
   color: var(--text);
 }
-.msg.user .turn { display: block; }
-.msg.user .mark { display: none; }
-.msg.assistant .bubble { display: flex; flex-direction: column; gap: 10px; }
-.turn { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; min-width: 0; }
-.mark { color: var(--accent); font-size: 11px; line-height: 24px; text-align: center; user-select: none; }
-.turn > .md { min-width: 0; }
-.msg.streaming .mark { animation: pulse 1s infinite; }
+.msg.assistant { gap: 12px; }
+.msg.assistant > .md { min-width: 0; }
+.mark { color: var(--muted); font-size: 11px; line-height: 24px; text-align: center; user-select: none; }
 .optimistic { opacity: 0.65; }
+
+/* Summary line of a run of actions: "Ran 9 commands, fetched a page, … +336 -23 ›" */
+.run { min-width: 0; }
+.run > summary { list-style: none; }
+.run > summary::-webkit-details-marker { display: none; }
+.summary-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; cursor: pointer; padding: 2px 0; min-width: 0; user-select: none; }
+.summary-line:hover { color: var(--text-2); }
+.summary-text { min-width: 0; }
+.run.is-error .summary-text { color: var(--err); }
+.diffstat { display: inline-flex; gap: 4px; flex: none; }
+.pill { font-family: var(--mono); font-size: 11.5px; line-height: 18px; padding: 0 6px; border-radius: 5px; font-weight: 600; }
+.pill.add { color: var(--ok); background: var(--diff-add-bg); }
+.pill.del { color: var(--err); background: var(--diff-del-bg); }
+.summary-err { color: var(--err); font-size: 12.5px; flex: none; }
+.chev { color: var(--muted); font-size: 18px; line-height: 1; margin-top: -2px; transition: transform 0.15s; flex: none; }
+.run[open] > summary .chev { transform: rotate(90deg); }
+.run-body { margin: 4px 0 2px 6px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+
+/* Plan (task list) card */
+.plan-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
+.plan-item { display: flex; align-items: flex-start; gap: 10px; font-size: 14.5px; color: var(--text-2); }
+.plan-item.completed { color: var(--muted); }
+.plan-item.in_progress { color: var(--text); }
+.plan-icon { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--muted); display: inline-flex; }
+.plan-item.completed .plan-icon { color: var(--text-2); }
+.plan-item.in_progress .plan-icon { color: var(--text-2); }
+
+/* Recap card (end-of-turn summary) */
+.recap-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 14px; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; }
+.recap-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.recap-ask { color: var(--text); }
+
+/* "••• Working 13min 52s" line while a turn is in progress */
+.working { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 2px 0; }
+.working-dots { display: inline-flex; gap: 3px; }
+.working-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
+.working-dots span:nth-child(2) { animation-delay: 0.2s; }
+.working-dots span:nth-child(3) { animation-delay: 0.4s; }
+.working-time { font-variant-numeric: tabular-nums; }
 
 .md { color: var(--text); }
 .md p { margin: 0 0 10px; }
 .md p:last-child, .md ul:last-child, .md ol:last-child, .md pre:last-child, .md blockquote:last-child { margin-bottom: 0; }
-.md h1, .md h2, .md h3 { font-family: var(--serif); font-weight: 600; margin: 14px 0 6px; line-height: 1.25; }
+.md h1, .md h2, .md h3 { font-weight: 600; margin: 14px 0 6px; line-height: 1.25; }
 .md h1 { font-size: 20px; }
 .md h2 { font-size: 18px; }
 .md h3 { font-size: 16px; }
@@ -393,9 +433,6 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .tool-body { padding: 4px 0 6px 28px; display: flex; flex-direction: column; gap: 6px; }
 /* A collapsed run of tool calls: the summary line stays, the list opens underneath,
    indented and tied together by a thin rule like nested output in the terminal. */
-.tool.run > summary .tool-name { color: var(--text-2); }
-.tool.run > summary .tool-summary { font-family: var(--sans); }
-.run-body { margin: 2px 0 4px 8px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .run-body .tool > summary { padding-left: 0; }
 .tool-body .code { margin: 0; }
 .result-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
@@ -405,17 +442,11 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .tool.thinking .mark { color: var(--muted); }
 .tool.thinking .code { color: var(--text-2); font-family: var(--sans); font-size: 13.5px; font-style: italic; background: none; border: 0; padding: 0 0 0 2px; }
 
-.typing { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center; }
-.typing .mark { animation: pulse 1s infinite; }
-.typing .dots { display: flex; gap: 5px; }
-.typing .dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
-.typing .dots span:nth-child(2) { animation-delay: 0.2s; }
-.typing .dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
 
 /* Composer: one rounded card holding the textarea and its controls, like the Claude input box. */
 .composer { padding: 6px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
-.composer > * { width: 100%; max-width: 860px; margin-inline: auto; }
+.composer > * { width: 100%; max-width: 760px; margin-inline: auto; }
 .composer-box {
   background: var(--bg-3);
   border: 1px solid var(--border);
