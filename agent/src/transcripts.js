@@ -321,7 +321,11 @@ export class TranscriptStore extends EventEmitter {
   }
 
   // Full history of a session, normalized. Also primes the live-tail offset.
-  async loadHistory(id, { maxMessages = 3000 } = {}) {
+  // Loads a page of a conversation. Default: the latest `limit` messages. `before` (a message
+  // uuid) returns the `limit` messages preceding it (scrolling up); `after` returns everything
+  // that follows it (catching up after a reconnect). Parsing the whole file is cheap; sending
+  // it to a phone is not, so paging happens here.
+  async loadHistory(id, { limit = 150, before = null, after = null } = {}) {
     const file = await this.findFile(id);
     if (!file) return { messages: [], offset: 0 };
     const messages = [];
@@ -350,8 +354,22 @@ export class TranscriptStore extends EventEmitter {
       /* keep computed */
     }
     this.offsets.set(id, offset);
-    const sliced = messages.length > maxMessages ? messages.slice(messages.length - maxMessages) : messages;
-    return { messages: sliced, truncated: sliced.length < messages.length, offset };
+    const max = Math.min(2000, Math.max(20, Number(limit) || 150));
+    const indexOf = (uuid) => (uuid ? messages.findIndex((m) => m.uuid === uuid) : -1);
+    if (after) {
+      const i = indexOf(after);
+      if (i >= 0) return { messages: messages.slice(i + 1), hasMore: false, truncated: false, mode: 'append', total: messages.length, offset };
+      // Unknown anchor (rotated/compacted transcript): fall back to the latest page.
+    }
+    if (before) {
+      const i = indexOf(before);
+      if (i >= 0) {
+        const start = Math.max(0, i - max);
+        return { messages: messages.slice(start, i), hasMore: start > 0, truncated: start > 0, mode: 'prepend', total: messages.length, offset };
+      }
+    }
+    const start = Math.max(0, messages.length - max);
+    return { messages: messages.slice(start), hasMore: start > 0, truncated: start > 0, mode: 'replace', total: messages.length, offset };
   }
 
   subscribe(id) {
@@ -451,7 +469,7 @@ export class TranscriptStore extends EventEmitter {
     this.listTimer = setTimeout(() => {
       this.listTimer = null;
       this.emit('sessions_changed');
-    }, 2500);
+    }, 1000);
   }
 
   stop() {

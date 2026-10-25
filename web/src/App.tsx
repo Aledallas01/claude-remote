@@ -11,7 +11,8 @@ interface Conversation {
   messages: Msg[];
   loaded: boolean;
   loading: boolean;
-  truncated: boolean;
+  truncated: boolean; // older messages exist on the PC and can be loaded with "load earlier"
+  loadingOlder?: boolean;
   partial: string;
 }
 
@@ -43,8 +44,8 @@ type Action =
   | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string; held?: boolean; staleHooks?: boolean }
   | { type: 'request'; request: PendingRequest }
   | { type: 'request_resolved'; id: string }
-  | { type: 'history'; sessionId: string; messages: Msg[]; truncated: boolean }
-  | { type: 'loading'; sessionId: string }
+  | { type: 'history'; sessionId: string; messages: Msg[]; truncated: boolean; mode?: 'replace' | 'prepend' | 'append' }
+  | { type: 'loading'; sessionId: string; older?: boolean }
   | { type: 'message'; sessionId: string; message: Msg }
   | { type: 'partial'; sessionId: string; text: string }
   | { type: 'partial_reset'; sessionId: string }
@@ -127,10 +128,20 @@ function reducer(state: State, a: Action): State {
     case 'request_resolved':
       return { ...state, pending: state.pending.filter((p) => p.id !== a.id) };
     case 'loading':
-      return { ...state, convs: { ...state.convs, [a.sessionId]: { ...(state.convs[a.sessionId] || emptyConv()), loading: true } } };
+      return { ...state, convs: { ...state.convs, [a.sessionId]: { ...(state.convs[a.sessionId] || emptyConv()), ...(a.older ? { loadingOlder: true } : { loading: true }) } } };
     case 'history': {
       const prev = state.convs[a.sessionId] || emptyConv();
-      // Keep live messages that arrived while loading and are not in the history.
+      if (a.mode === 'prepend') {
+        const known = new Set(prev.messages.map((m) => m.uuid));
+        const older = a.messages.filter((m) => !m.uuid || !known.has(m.uuid));
+        return { ...state, convs: { ...state.convs, [a.sessionId]: { ...prev, messages: [...older, ...prev.messages], truncated: a.truncated, loadingOlder: false } } };
+      }
+      if (a.mode === 'append') {
+        let conv = { ...prev, loaded: true, loading: false };
+        for (const m of a.messages) conv = addMessage(conv, m);
+        return { ...state, convs: { ...state.convs, [a.sessionId]: conv } };
+      }
+      // Replace. Keep live messages that arrived while loading and are not in the history.
       const ids = new Set(a.messages.map((m) => m.uuid));
       const extra = prev.messages.filter((m) => m.uuid && !ids.has(m.uuid) && !m.optimistic);
       return { ...state, convs: { ...state.convs, [a.sessionId]: { messages: [...a.messages, ...extra], loaded: true, loading: false, truncated: a.truncated, partial: prev.partial } } };
@@ -276,7 +287,7 @@ export default function App() {
           break;
         case 'session_init':
           dispatch({ type: 'session_init', clientRef: m.clientRef, sessionId: m.sessionId, cwd: m.cwd });
-          if (m.clientRef) client.request({ type: 'open_session', sessionId: m.sessionId }).then((h) => dispatch({ type: 'history', sessionId: h.sessionId, messages: h.messages, truncated: h.truncated })).catch(() => {});
+          if (m.clientRef) client.request({ type: 'open_session', sessionId: m.sessionId }).then((h) => dispatch({ type: 'history', sessionId: h.sessionId, messages: h.messages, truncated: h.truncated, mode: h.mode })).catch(() => {});
           break;
         case 'result':
           if (m.isError) dispatch({ type: 'toast', text: `${t('turnError')}: ${String(m.result || '').slice(0, 200)}`, kind: 'error' });
@@ -320,12 +331,32 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn?.url, conn?.token]);
 
+  // Opens a conversation. First time: the latest page. On a reconnect (silent) with the
+  // conversation already loaded: only what arrived since the last known message.
   const openSession = useCallback(
     (id: string, silent = false) => {
-      if (!silent) dispatch({ type: 'loading', sessionId: id });
+      const conv = stateRef.current.convs[id];
+      const last = conv?.loaded ? [...conv.messages].reverse().find((m) => m.uuid && !m.optimistic && !m.uuid.startsWith('local-')) : undefined;
+      if (!silent && !conv?.loaded) dispatch({ type: 'loading', sessionId: id });
+      const req: Record<string, unknown> = { type: 'open_session', sessionId: id };
+      if (last) req.after = last.uuid;
       client
-        .request({ type: 'open_session', sessionId: id }, 60000)
-        .then((h) => dispatch({ type: 'history', sessionId: h.sessionId, messages: h.messages, truncated: h.truncated }))
+        .request(req, 60000)
+        .then((h) => dispatch({ type: 'history', sessionId: h.sessionId, messages: h.messages, truncated: h.truncated, mode: h.mode }))
+        .catch((err) => dispatch({ type: 'toast', text: err.message, kind: 'error' }));
+    },
+    [client],
+  );
+
+  const loadOlder = useCallback(
+    (id: string) => {
+      const conv = stateRef.current.convs[id];
+      const first = conv?.messages.find((m) => m.uuid && !m.optimistic && !m.uuid.startsWith('local-'));
+      if (!first || conv?.loadingOlder) return;
+      dispatch({ type: 'loading', sessionId: id, older: true });
+      client
+        .request({ type: 'open_session', sessionId: id, before: first.uuid }, 60000)
+        .then((h) => dispatch({ type: 'history', sessionId: h.sessionId, messages: h.messages, truncated: h.truncated, mode: 'prepend' }))
         .catch((err) => dispatch({ type: 'toast', text: err.message, kind: 'error' }));
     },
     [client],
@@ -627,6 +658,8 @@ export default function App() {
             partial={currentConv?.partial || ''}
             loaded={!!currentConv?.loaded}
             truncated={!!currentConv?.truncated}
+            loadingOlder={!!currentConv?.loadingOlder}
+            onLoadOlder={() => state.current && loadOlder(state.current)}
             status={currentState?.status || 'idle'}
             source={currentState?.source}
             held={!!currentState?.held}

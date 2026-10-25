@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Msg, PendingRequest, Project, SessionMeta } from '../types';
 import type { T, Lang } from '../i18n';
 import { collectResults, groupMessages, lastRecap, MessageGroup, planSnapshots, RecapBox } from './Messages';
@@ -7,9 +7,11 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, statusSince, source, held = false, staleHooks = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, loadingOlder = false, onLoadOlder, status, statusSince, source, held = false, staleHooks = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
   lang: Lang;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => void;
   statusSince?: string; // when the current status began (for the "working for 1m 20s" line)
   meta?: SessionMeta;
   isNew?: boolean;
@@ -67,9 +69,18 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
     return s >= 60 ? `${Math.floor(s / 60)}min ${s % 60}s` : `${s}s`;
   })();
 
+  // After older messages are prepended, keep what the user was reading in place.
+  const prependAnchor = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || prependAnchor.current === null) return;
+    el.scrollTop = el.scrollHeight - prependAnchor.current;
+    prependAnchor.current = null;
+  }, [messages]);
+
   useEffect(() => {
     const el = scroller.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (el && stick.current && prependAnchor.current === null) el.scrollTop = el.scrollHeight;
   }, [messages, partial, pending.length, loaded]);
 
   const onScroll = () => {
@@ -153,7 +164,21 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
           </div>
         )}
         {!loaded && !isNew && <div className="muted small pad">{t('loadingHistory')}</div>}
-        {truncated && <div className="muted small pad center">{t('truncated')}</div>}
+        {truncated && loaded && (
+          <div className="center">
+            <button
+              className="btn compact"
+              disabled={loadingOlder}
+              onClick={() => {
+                const el = scroller.current;
+                prependAnchor.current = el ? el.scrollHeight - el.scrollTop : null;
+                onLoadOlder?.();
+              }}
+            >
+              {loadingOlder ? t('loadingHistory') : t('loadOlder')}
+            </button>
+          </div>
+        )}
         {groups.map((g, i) => (
           <MessageGroup key={g.items[0].uuid || i} group={g} results={results} plans={plans} t={t} lang={lang} />
         ))}

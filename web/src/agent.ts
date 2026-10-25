@@ -32,6 +32,43 @@ export class AgentClient {
     for (const fn of this.statusListeners) fn(s, detail);
   }
 
+  constructor() {
+    // Phones suspend sockets in the background, often without a close event. Coming back to
+    // the foreground (or back online) checks the socket at once and reconnects immediately
+    // instead of waiting for the backoff timer.
+    if (typeof window !== 'undefined') {
+      const wake = () => this.wake();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') wake();
+      });
+      window.addEventListener('online', wake);
+      window.addEventListener('focus', wake);
+      window.addEventListener('pageshow', wake);
+    }
+  }
+
+  private wake() {
+    if (!this.conn || this.manualClose) return;
+    if (this.status === 'connected') {
+      // Probe: a dead socket answers nothing; force a fresh connection then.
+      this.request({ type: 'ping' }, 4000).catch(() => {
+        if (this.status !== 'connected') return;
+        const ws = this.ws;
+        this.ws = null;
+        try {
+          ws?.close();
+        } catch {
+          /* ignore */
+        }
+        this.setStatus('disconnected', 'stale connection');
+        this.retry = 0;
+        this.open();
+      });
+      return;
+    }
+    if (this.status !== 'connecting') this.reconnectNow();
+  }
+
   connect(conn: Connection) {
     this.conn = conn;
     this.manualClose = false;
@@ -101,7 +138,7 @@ export class AgentClient {
 
   private scheduleRetry() {
     if (this.retryTimer || this.manualClose) return;
-    const delay = Math.min(15000, 1000 * Math.pow(2, this.retry++));
+    const delay = Math.min(10000, 500 * Math.pow(2, this.retry++));
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = null;
       this.open();

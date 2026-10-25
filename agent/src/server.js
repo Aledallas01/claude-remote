@@ -173,7 +173,13 @@ export class AgentServer {
       if (!res.headersSent) res.writeHead(500);
       res.end();
     }));
-    this.wss = new WebSocketServer({ server: this.http, path: '/ws', maxPayload: MAX_PAYLOAD });
+    // Compression: conversation JSON shrinks 5-10x, which is what a phone on the tunnel feels.
+    this.wss = new WebSocketServer({
+      server: this.http,
+      path: '/ws',
+      maxPayload: MAX_PAYLOAD,
+      perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 6 }, clientNoContextTakeover: true, serverNoContextTakeover: true },
+    });
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
     this.wss.on('error', (err) => this.log(`websocket server error: ${err.message}`)); // ws re-emits http errors here
     await new Promise((resolve, reject) => {
@@ -484,7 +490,11 @@ export class AgentServer {
         const id = String(msg.sessionId || '');
         if (!UUID_RE.test(id)) throw new Error('invalid session id');
         this.markWebActivity(id);
-        const history = await this.store.loadHistory(id);
+        const history = await this.store.loadHistory(id, {
+          limit: msg.limit,
+          before: UUID_RE.test(String(msg.before || '')) ? String(msg.before) : null,
+          after: UUID_RE.test(String(msg.after || '')) ? String(msg.after) : null,
+        });
         this.store.subscribe(id);
         subs.add(id);
         ws.subs = subs;
@@ -495,6 +505,9 @@ export class AgentServer {
           meta: this.store.getMeta(id) ? publicMetaOf(this.store.getMeta(id)) : null,
           messages: history.messages,
           truncated: !!history.truncated,
+          hasMore: !!history.hasMore,
+          mode: history.mode,
+          total: history.total,
         });
       }
       case 'close_session': {
