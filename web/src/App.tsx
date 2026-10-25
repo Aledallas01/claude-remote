@@ -40,7 +40,7 @@ type Action =
   | { type: 'queued'; sessionId: string; count: number }
   | { type: 'delivered'; sessionId: string }
   | { type: 'sessions'; sessions: SessionMeta[]; sections?: SidebarSection[] }
-  | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string; held?: boolean }
+  | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string; held?: boolean; staleHooks?: boolean }
   | { type: 'request'; request: PendingRequest }
   | { type: 'request_resolved'; id: string }
   | { type: 'history'; sessionId: string; messages: Msg[]; truncated: boolean }
@@ -117,7 +117,7 @@ function reducer(state: State, a: Action): State {
         const prev = states[a.sessionId];
         // updatedAt marks when the current status began (drives the "working for …" timer).
         const updatedAt = prev && prev.status === a.status ? prev.updatedAt : new Date().toISOString();
-        states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || prev?.cwd || '', held: !!a.held, updatedAt };
+        states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || prev?.cwd || '', held: !!a.held, staleHooks: a.staleHooks ?? prev?.staleHooks ?? false, updatedAt };
       }
       return { ...state, states };
     }
@@ -255,7 +255,7 @@ export default function App() {
           dispatch({ type: 'sessions', sessions: m.sessions, sections: m.sections });
           break;
         case 'status':
-          if (m.sessionId) dispatch({ type: 'status', sessionId: m.sessionId, status: m.status, source: m.source, cwd: m.cwd, held: m.held });
+          if (m.sessionId) dispatch({ type: 'status', sessionId: m.sessionId, status: m.status, source: m.source, cwd: m.cwd, held: m.held, staleHooks: m.staleHooks });
           break;
         case 'request':
           dispatch({ type: 'request', request: m.request });
@@ -600,6 +600,7 @@ export default function App() {
             status={currentState?.status || 'idle'}
             source={currentState?.source}
             held={!!currentState?.held}
+            staleHooks={!!currentState?.staleHooks}
             hookOnly={state.agent?.loggedIn === false && !!state.agent?.hooks.installed}
             focusRequestId={focusRequestId}
             pending={currentPending}

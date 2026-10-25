@@ -7,7 +7,7 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, statusSince, source, held = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, statusSince, source, held = false, staleHooks = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
   lang: Lang;
   statusSince?: string; // when the current status began (for the "working for 1m 20s" line)
@@ -15,6 +15,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
   isNew?: boolean;
   hookOnly?: boolean; // the PC cannot start Claude from here (no CLI login): messages always go through the hooks
   held?: boolean; // the Stop hook is holding the session for a message from here
+  staleHooks?: boolean; // the session runs with older hooks: no immediate delivery until it is reopened
   focusRequestId?: string | null; // scroll to and highlight this pending request (opened from a notification)
   draftCwd?: string;
   projects?: Project[];
@@ -188,7 +189,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
       </div>
 
       <div className="composer">
-        {liveElsewhere && <div className="hint">{held ? t('hookDeliverNow') : status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
+        {liveElsewhere && <div className="hint">{held ? t('hookDeliverNow') : status === 'idle' ? (staleHooks ? t('hookDeliverStale') : t('hookDeliverIdle')) : t('hookDeliverOnStop')}</div>}
         {queued > 0 && (
           <div className="queued">
             <span>

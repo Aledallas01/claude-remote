@@ -47,6 +47,7 @@ export interface SessionState {
   cwd: string;
   updatedAt: string;
   held?: boolean; // the Stop hook is holding the session: a message from here is delivered at once
+  staleHooks?: boolean; // the session started with older hooks: Claude Code cuts the Stop hold short
 }
 
 export interface PermissionSuggestion {

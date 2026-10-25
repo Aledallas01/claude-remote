@@ -121,6 +121,8 @@ export async function handleHookEvent(event, payload, ctx) {
   const cwd = typeof payload?.cwd === 'string' ? payload.cwd : '';
   const touch = (status, extra = {}) => {
     if (!sessionId) return;
+    const prev = ctx.states.get(sessionId) || {};
+    const staleHooks = extra.staleHooks ?? prev.staleHooks ?? false; // sticky: set once the Stop hook was cut short
     ctx.states.set(sessionId, {
       status,
       source: 'hook',
@@ -128,8 +130,9 @@ export async function handleHookEvent(event, payload, ctx) {
       transcriptPath: payload.transcript_path,
       updatedAt: new Date().toISOString(),
       ...extra,
+      staleHooks,
     });
-    ctx.emit('status', { sessionId, status, source: 'hook', cwd, held: !!extra.held });
+    ctx.emit('status', { sessionId, status, source: 'hook', cwd, held: !!extra.held, staleHooks });
   };
 
   switch (event) {
@@ -183,7 +186,7 @@ export async function handleHookEvent(event, payload, ctx) {
           // Claude Code ended the hook (its timeout is shorter than the hold): leave the queue
           // untouched so the message is delivered at the next turn instead of vanishing.
           ctx.log(`Stop ${short}: hook closed by Claude Code after ${Math.round((Date.now() - t0) / 1000)}s (hook timeout shorter than stopHoldSeconds; restart that session to apply the new hooks)`);
-          touch('idle');
+          touch('idle', { staleHooks: true });
           return {};
         }
         queued = got ? takeQueued(ctx, sessionId) : null;

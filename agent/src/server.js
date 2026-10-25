@@ -631,6 +631,7 @@ export class AgentServer {
           source: payload.source || prev.source,
           cwd: payload.cwd || prev.cwd || '',
           held: !!payload.held,
+          staleHooks: payload.staleHooks ?? prev.staleHooks ?? false,
           updatedAt: new Date().toISOString(),
         });
       }
