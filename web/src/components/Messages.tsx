@@ -139,8 +139,10 @@ export interface Group {
 export function groupMessages(messages: Msg[]): Group[] {
   const groups: Group[] = [];
   for (const m of messages) {
-    const onlyResults = m.blocks.every((b) => b.type === 'tool_result');
-    if (onlyResults) continue; // attached to tool_use blocks
+    // Messages with nothing to show (tool results, empty thinking, blank text) must not
+    // break the assistant's turn in two.
+    const invisible = m.blocks.every((b) => b.type === 'tool_result' || (b.type === 'thinking' && !b.text.trim()) || (b.type === 'text' && !b.text.trim()));
+    if (invisible) continue;
     const last = groups[groups.length - 1];
     if (last && last.role === m.role && m.role === 'assistant') last.items.push(m);
     else groups.push({ role: m.role, ts: m.ts, items: [m] });
@@ -169,8 +171,12 @@ function splitRuns(items: Msg[]): Run[] {
   items.forEach((m, i) => {
     m.blocks.forEach((b, j) => {
       const key = `${m.uuid || i}:${j}`;
+      // Blocks that render nothing must not split a run: results (shown under their call),
+      // redacted/empty thinking, blank text.
       if (b.type === 'tool_result') return;
-      const isTool = b.type === 'tool_use' || (b.type === 'thinking' && !!b.text);
+      if (b.type === 'thinking' && !b.text.trim()) return;
+      if (b.type === 'text' && !b.text.trim()) return;
+      const isTool = b.type === 'tool_use' || b.type === 'thinking';
       if (!isTool) {
         runs.push({ kind: 'text', block: b, key });
         return;
