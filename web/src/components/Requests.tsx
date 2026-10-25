@@ -157,6 +157,11 @@ export function QuestionCard({ req, t, onAnswer, sessionTitle }: { req: PendingR
   );
 }
 
-export function RequestCard(props: { req: PendingRequest; t: T; onAnswer: (a: Answer) => void; sessionTitle?: string }) {
-  return props.req.kind === 'question' ? <QuestionCard {...props} /> : <PermissionCard {...props} />;
+export function RequestCard(props: { req: PendingRequest; t: T; onAnswer: (a: Answer) => void; sessionTitle?: string; highlight?: boolean }) {
+  const { highlight, ...rest } = props;
+  return (
+    <div id={`req-${props.req.id}`} className={highlight ? 'highlight-wrap' : undefined}>
+      {props.req.kind === 'question' ? <QuestionCard {...rest} /> : <PermissionCard {...rest} />}
+    </div>
+  );
 }

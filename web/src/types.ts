@@ -46,6 +46,7 @@ export interface SessionState {
   source: 'sdk' | 'hook';
   cwd: string;
   updatedAt: string;
+  held?: boolean; // the Stop hook is holding the session: a message from here is delivered at once
 }
 
 export interface PermissionSuggestion {
@@ -82,7 +83,9 @@ export interface AgentInfo {
   platform: string;
   hooks: { installed: boolean; events: string[] };
   hookWaitSeconds: number;
+  stopHoldSeconds?: number;
   loggedIn: boolean | null;
+  push?: { publicKey: string; subscriptions: number } | null;
 }
 
 export interface Project {

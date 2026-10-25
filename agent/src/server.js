@@ -15,6 +15,9 @@ import { RequestHub } from './requests.js';
 import { RunnerManager } from './runner.js';
 import { handleHookEvent, hooksStatus } from './hooks.js';
 import { DesktopIndex } from './desktop.js';
+import { PushStore } from './push.js';
+
+const WEB_ACTIVE_MS = 60 * 60 * 1000; // a session counts as "in use from the web" for this long
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const AUTH_TIMEOUT_MS = 8000;
@@ -68,7 +71,18 @@ export class AgentServer {
       emit: (type, payload) => this.onRunnerEvent(type, payload),
       log,
     });
-    this.hub.on('created', (request) => this.broadcast({ type: 'request', request }));
+    this.webActivity = new Map(); // sessionId -> last time a web client opened / wrote to it
+    this.queueWaiters = new Map(); // sessionId -> resolve(), a Stop hook holding the session
+    try {
+      this.push = new PushStore(cfg, { log });
+    } catch (err) {
+      log(`push disabled: ${err.message}`);
+      this.push = null;
+    }
+    this.hub.on('created', (request) => {
+      this.broadcast({ type: 'request', request });
+      this.pushForRequest(request).catch((err) => log(`push: ${err.message}`));
+    });
     this.hub.on('resolved', (info) => this.broadcast({ type: 'request_resolved', ...info }));
     this.store.on('messages', ({ sessionId, messages }) => {
       for (const message of messages) this.broadcast({ type: 'message', sessionId, message, live: false });
@@ -197,6 +211,8 @@ export class AgentServer {
         queues: this.queues,
         emit: (type, p) => this.onRunnerEvent(type, p),
         clientCount: () => this.clients.size,
+        webActive: (id) => this.webActive(id),
+        waitForQueued: (id, ms) => this.waitForQueued(id, ms),
         cfg: this.cfg,
         log: this.log,
       });
@@ -314,8 +330,66 @@ export class AgentServer {
       platform: process.platform,
       hooks: hooksStatus(),
       hookWaitSeconds: this.cfg.hookWaitSeconds,
+      stopHoldSeconds: this.cfg.stopHoldSeconds,
       loggedIn: this.loggedIn,
+      push: this.push ? { publicKey: this.push.publicKey, subscriptions: this.push.count } : null,
     };
+  }
+
+  // ---------- web activity / Stop hold ----------
+
+  markWebActivity(sessionId) {
+    if (sessionId) this.webActivity.set(sessionId, Date.now());
+  }
+
+  webActive(sessionId) {
+    const t = this.webActivity.get(sessionId);
+    return !!t && Date.now() - t < WEB_ACTIVE_MS;
+  }
+
+  // Resolves true as soon as a message is queued for the session, false after `ms` or when
+  // the last web client leaves (then holding the terminal makes no sense).
+  waitForQueued(sessionId, ms) {
+    if ((this.queues.get(sessionId) || []).length) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearInterval(poll);
+        if (this.queueWaiters.get(sessionId) === finish) this.queueWaiters.delete(sessionId);
+        resolve(v);
+      };
+      const timer = setTimeout(() => finish(false), ms);
+      const poll = setInterval(() => {
+        if (this.clients.size === 0) finish(false);
+      }, 1000);
+      this.queueWaiters.get(sessionId)?.(false); // an older hold for the same session gives way
+      this.queueWaiters.set(sessionId, finish);
+    });
+  }
+
+  // ---------- push ----------
+
+  async pushForRequest(request) {
+    if (!this.push || !this.push.count) return;
+    if (request.kind !== 'permission' && request.kind !== 'question') return;
+    const meta = request.sessionId ? this.store.getMeta(request.sessionId) : null;
+    const d = request.sessionId ? this.desktop.info(request.sessionId) : null;
+    const title = (d?.title || meta?.title || '').slice(0, 80);
+    const firstString = Object.values(request.input || {}).find((v) => typeof v === 'string');
+    const detail = request.kind === 'question' ? String(request.input?.questions?.[0]?.question || '') : String(request.input?.description || request.input?.file_path || request.input?.command || firstString || '');
+    await this.push.notify({
+      type: 'request',
+      kind: request.kind,
+      requestId: request.id,
+      sessionId: request.sessionId,
+      toolName: request.toolName,
+      session: title,
+      detail: detail.split('\n')[0].slice(0, 140),
+      expiresAt: request.expiresAt,
+    });
   }
 
   statesList() {
@@ -348,6 +422,7 @@ export class AgentServer {
       case 'open_session': {
         const id = String(msg.sessionId || '');
         if (!UUID_RE.test(id)) throw new Error('invalid session id');
+        this.markWebActivity(id);
         const history = await this.store.loadHistory(id);
         this.store.subscribe(id);
         subs.add(id);
@@ -381,13 +456,16 @@ export class AgentServer {
           // needed, and the terminal owns the conversation so the SDK must not resume it).
           // Without a CLI login the SDK cannot resume an idle session either, so the message is
           // queued the same way and reaches Claude the next time that session runs on the PC.
+          this.markWebActivity(sessionId);
           const live = this.isLiveElsewhere(sessionId);
           if (live || (this.loggedIn === false && hooksStatus().installed)) {
             const q = this.queues.get(sessionId) || [];
             q.push({ text, ts: new Date().toISOString() });
             this.queues.set(sessionId, q);
             this.broadcast({ type: 'queued', sessionId, count: q.length });
-            return this.send(ws, { type: 'ok', reqId, sessionId, delivery: 'hook', queued: q.length, live });
+            const waiter = this.queueWaiters.get(sessionId);
+            if (waiter) waiter(true); // a Stop hook is holding the session: deliver right now
+            return this.send(ws, { type: 'ok', reqId, sessionId, delivery: 'hook', queued: q.length, live, immediate: !!waiter });
           }
         }
         if (this.loggedIn === false) {
@@ -442,6 +520,17 @@ export class AgentServer {
         if (!ok) throw new Error('request no longer pending');
         return this.send(ws, { type: 'ok', reqId });
       }
+      case 'push_subscribe': {
+        if (!this.push) throw new Error('push is not available on this agent');
+        const n = this.push.add(msg.subscription, { ua: msg.ua });
+        this.log(`push: subscription added (${n} total)`);
+        return this.send(ws, { type: 'ok', reqId, subscriptions: n });
+      }
+      case 'push_unsubscribe': {
+        if (!this.push) throw new Error('push is not available on this agent');
+        const n = this.push.remove(String(msg.endpoint || ''));
+        return this.send(ws, { type: 'ok', reqId, subscriptions: n });
+      }
       case 'get_state':
         return this.send(ws, {
           type: 'state',
@@ -480,6 +569,7 @@ export class AgentServer {
           status: payload.status,
           source: payload.source || prev.source,
           cwd: payload.cwd || prev.cwd || '',
+          held: !!payload.held,
           updatedAt: new Date().toISOString(),
         });
       }

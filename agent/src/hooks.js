@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { CLAUDE_DIR } from './transcripts.js';
 
 const MARKER = 'claude-remote-hook.js';
-const EVENTS_SHORT = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification'];
+const EVENTS_SHORT = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Notification'];
 
 export function hookScriptPath() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +92,8 @@ export function installHooks(cfg) {
   for (const ev of EVENTS_SHORT) {
     add(ev, { hooks: [{ type: 'command', command: hookCommand(ev), timeout: 10 }] });
   }
+  // Stop may hold the session open for a message coming from the web UI.
+  add('Stop', { hooks: [{ type: 'command', command: hookCommand('Stop'), timeout: Math.max(30, Number(cfg.stopHoldSeconds || 120) + 20) }] });
   add('PermissionRequest', { hooks: [{ type: 'command', command: hookCommand('PermissionRequest'), timeout: longTimeout }] });
   add('PreToolUse', {
     matcher: 'AskUserQuestion',
@@ -127,7 +129,7 @@ export async function handleHookEvent(event, payload, ctx) {
       updatedAt: new Date().toISOString(),
       ...extra,
     });
-    ctx.emit('status', { sessionId, status, source: 'hook', cwd });
+    ctx.emit('status', { sessionId, status, source: 'hook', cwd, held: !!extra.held });
   };
 
   switch (event) {
@@ -159,10 +161,24 @@ export async function handleHookEvent(event, payload, ctx) {
       ctx.emit('stopped', { sessionId, cwd, lastAssistantMessage: String(payload.last_assistant_message || '').slice(0, 4000) });
       // A message queued from the web is delivered as the next instruction: blocking the stop
       // with a reason makes Claude continue with that text, using the session's own credentials.
-      const queued = takeQueued(ctx, sessionId);
+      const deliver = (text) => ({ decision: 'block', reason: `The user sent this message from Claude Remote (web). Continue with it as the next instruction:\n\n${text}` });
+      let queued = takeQueued(ctx, sessionId);
       if (queued) {
         touch('running');
-        return { decision: 'block', reason: `The user sent this message from Claude Remote (web). Continue with it as the next instruction:\n\n${queued}` };
+        return deliver(queued);
+      }
+      // Nobody typed yet. If the web UI has been using this session recently and someone is
+      // connected, keep the hook open for a while: a message sent from the phone in that window
+      // reaches Claude at once instead of waiting for the next terminal prompt.
+      const holdMs = Math.max(0, Number(ctx.cfg.stopHoldSeconds ?? 120)) * 1000;
+      if (holdMs > 0 && ctx.clientCount() > 0 && ctx.webActive?.(sessionId)) {
+        touch('idle', { held: true });
+        const got = await ctx.waitForQueued(sessionId, holdMs);
+        queued = got ? takeQueued(ctx, sessionId) : '';
+        if (queued) {
+          touch('running');
+          return deliver(queued);
+        }
       }
       touch('idle');
       return {};

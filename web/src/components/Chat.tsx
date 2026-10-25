@@ -7,11 +7,13 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, queued = 0, hookOnly = false, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, held = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
   meta?: SessionMeta;
   isNew?: boolean;
   hookOnly?: boolean; // the PC cannot start Claude from here (no CLI login): messages always go through the hooks
+  held?: boolean; // the Stop hook is holding the session for a message from here
+  focusRequestId?: string | null; // scroll to and highlight this pending request (opened from a notification)
   draftCwd?: string;
   projects?: Project[];
   messages: Msg[];
@@ -56,6 +58,14 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
     if (!el) return;
     stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
+
+  // Opened from a notification: bring the request into view once it is rendered.
+  useEffect(() => {
+    if (!focusRequestId) return;
+    if (!pending.some((p) => p.id === focusRequestId)) return;
+    const el = document.getElementById(`req-${focusRequestId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusRequestId, pending, loaded]);
 
   const submit = async () => {
     const body = text.trim();
@@ -149,12 +159,12 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
           </div>
         )}
         {pending.map((p) => (
-          <RequestCard key={p.id} req={p} t={t} onAnswer={(a) => onAnswer(p, a)} />
+          <RequestCard key={p.id} req={p} t={t} onAnswer={(a) => onAnswer(p, a)} highlight={p.id === focusRequestId} />
         ))}
       </div>
 
       <div className="composer">
-        {liveElsewhere && <div className="hint">{status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
+        {liveElsewhere && <div className="hint">{held ? t('hookDeliverNow') : status === 'idle' ? t('hookDeliverIdle') : t('hookDeliverOnStop')}</div>}
         {queued > 0 && (
           <div className="queued">
             <span>

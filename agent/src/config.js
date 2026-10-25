@@ -48,6 +48,9 @@ const DEFAULTS = {
   webUrl: DEFAULT_WEB_URL,
   tunnel: true,
   hookWaitSeconds: 180,
+  // After a turn ends in a session that the web UI is using, the Stop hook keeps the session
+  // reachable for this long so a message from the phone reaches Claude immediately.
+  stopHoldSeconds: 120,
   hooksPrompted: false,
   agentName: os.hostname(),
 };

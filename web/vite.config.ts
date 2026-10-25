@@ -5,20 +5,20 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   plugins: [
     react(),
-    // Offline app shell: once the page has been opened over HTTPS, the browser keeps a copy
-    // of the HTML, scripts and styles. A DNS hiccup or a flaky network then shows the app
-    // (reconnecting) instead of the browser's "server not found" page. Nothing dynamic is
-    // cached: conversations only travel over the WebSocket to the user's own PC.
+    // Offline app shell + push notifications. The service worker source is src/sw.ts:
+    // once the page has been opened over HTTPS the browser keeps a copy of the HTML, scripts
+    // and styles (a DNS hiccup shows the app reconnecting instead of "server not found"), and
+    // the worker shows notifications pushed by the agent, opening the right chat on tap.
+    // Nothing dynamic is cached: conversations only travel over the WebSocket to the PC.
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       manifest: false, // public/manifest.webmanifest is hand-written
       includeAssets: ['favicon.svg', 'manifest.webmanifest'],
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,webmanifest}'],
-        navigateFallback: '/index.html',
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
       },
     }),
   ],

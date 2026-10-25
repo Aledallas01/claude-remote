@@ -40,7 +40,7 @@ type Action =
   | { type: 'queued'; sessionId: string; count: number }
   | { type: 'delivered'; sessionId: string }
   | { type: 'sessions'; sessions: SessionMeta[]; sections?: SidebarSection[] }
-  | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string }
+  | { type: 'status'; sessionId: string; status: SessionState['status']; source: SessionState['source']; cwd?: string; held?: boolean }
   | { type: 'request'; request: PendingRequest }
   | { type: 'request_resolved'; id: string }
   | { type: 'history'; sessionId: string; messages: Msg[]; truncated: boolean }
@@ -113,7 +113,7 @@ function reducer(state: State, a: Action): State {
     case 'status': {
       const states = { ...state.states };
       if (a.status === 'ended') delete states[a.sessionId];
-      else states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || states[a.sessionId]?.cwd || '', updatedAt: new Date().toISOString() };
+      else states[a.sessionId] = { sessionId: a.sessionId, status: a.status, source: a.source, cwd: a.cwd || states[a.sessionId]?.cwd || '', held: !!a.held, updatedAt: new Date().toISOString() };
       return { ...state, states };
     }
     case 'request':
@@ -182,6 +182,15 @@ function reducer(state: State, a: Action): State {
 
 const initialState: State = { agent: null, sessions: [], sections: [], states: {}, pending: [], convs: {}, current: null, draft: null, toasts: [], queued: {} };
 
+// VAPID public key (base64url) -> bytes, as PushManager.subscribe expects.
+function urlBase64ToUint8Array(b64: string): Uint8Array<ArrayBuffer> {
+  const padded = (b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(padded);
+  const out = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
 export default function App() {
   const [lang, setLangState] = useState<Lang>(detectLang);
   const t = useMemo(() => makeT(lang), [lang]);
@@ -232,12 +241,16 @@ export default function App() {
             const cur = stateRef.current.current;
             if (cur && cur !== 'new') openSession(cur, true);
           }
+          // Keep the agent's push subscription for this device current.
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && m.agent?.push?.publicKey) {
+            subscribePush(m.agent.push.publicKey).catch(() => {});
+          }
           break;
         case 'sessions':
           dispatch({ type: 'sessions', sessions: m.sessions, sections: m.sections });
           break;
         case 'status':
-          if (m.sessionId) dispatch({ type: 'status', sessionId: m.sessionId, status: m.status, source: m.source, cwd: m.cwd });
+          if (m.sessionId) dispatch({ type: 'status', sessionId: m.sessionId, status: m.status, source: m.source, cwd: m.cwd, held: m.held });
           break;
         case 'request':
           dispatch({ type: 'request', request: m.request });
@@ -245,6 +258,7 @@ export default function App() {
           break;
         case 'request_resolved':
           dispatch({ type: 'request_resolved', id: m.id });
+          closeNotification(m.id);
           break;
         case 'message':
           if (m.sessionId) dispatch({ type: 'message', sessionId: m.sessionId, message: m.message });
@@ -311,8 +325,44 @@ export default function App() {
   const select = (id: string) => {
     dispatch({ type: 'select', id });
     setSidebarOpen(false);
-    if (!state.convs[id]?.loaded) openSession(id);
+    if (!stateRef.current.convs[id]?.loaded) openSession(id);
   };
+
+  // A request to show: set when a notification is tapped (service worker message) or when
+  // the app is opened from one (?open=<session>&req=<request>).
+  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
+  const showRequest = useCallback(
+    (sessionId: string | null, requestId: string | null) => {
+      if (sessionId) select(sessionId);
+      setFocusRequestId(requestId);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const open = params.get('open');
+    const req = params.get('req');
+    if (open || req) {
+      history.replaceState(null, '', window.location.pathname);
+      pendingOpen.current = { sessionId: open, requestId: req };
+    }
+    const onSwMessage = (ev: MessageEvent) => {
+      const d = ev.data || {};
+      if (d.type === 'open') showRequest(d.sessionId || null, d.requestId || null);
+    };
+    navigator.serviceWorker?.addEventListener('message', onSwMessage);
+    return () => navigator.serviceWorker?.removeEventListener('message', onSwMessage);
+  }, [showRequest]);
+  const pendingOpen = useRef<{ sessionId: string | null; requestId: string | null } | null>(null);
+  useEffect(() => {
+    // Apply a deferred open once the session list is known (after the first hello).
+    if (pendingOpen.current && state.sessions.length) {
+      const { sessionId, requestId } = pendingOpen.current;
+      pendingOpen.current = null;
+      showRequest(sessionId, requestId);
+    }
+  }, [state.sessions.length, showRequest]);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const startNew = async () => {
@@ -349,24 +399,66 @@ export default function App() {
     dispatch({ type: 'request_resolved', id: req.id });
   };
 
+  // Local notification while the page is open. With push enabled the agent's push shows the
+  // same notification (same tag), so this only covers browsers without push (plain-http LAN).
   const maybeNotify = (req: PendingRequest) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     if (document.visibilityState === 'visible' && document.hasFocus()) return;
-    try {
-      const n = new Notification(req.kind === 'question' ? t('needsInput') : `${t('pending')}: ${req.toolName}`, { body: req.cwd, tag: req.id });
-      n.onclick = () => {
-        window.focus();
-        if (req.sessionId) select(req.sessionId);
-      };
-    } catch {
-      /* ignore */
-    }
+    if (pushSubscribed.current) return;
+    const title = req.kind === 'question' ? t('needsInput') : `${t('pending')}: ${req.toolName}`;
+    const body = stateRef.current.sessions.find((s) => s.id === req.sessionId)?.title || req.cwd;
+    const data = { sessionId: req.sessionId, requestId: req.id };
+    navigator.serviceWorker?.getRegistration().then((reg) => {
+      if (reg) {
+        reg.showNotification(title, { body, tag: req.id, icon: '/favicon.svg', data }).catch(() => {});
+        return;
+      }
+      try {
+        const n = new Notification(title, { body, tag: req.id });
+        n.onclick = () => {
+          window.focus();
+          showRequest(req.sessionId, req.id);
+        };
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+
+  const closeNotification = (requestId: string) => {
+    navigator.serviceWorker?.getRegistration().then((reg) => reg?.getNotifications({ tag: requestId }).then((list) => list.forEach((n) => n.close()))).catch(() => {});
+  };
+
+  // Web Push: the agent sends permission prompts and questions to this device even when the
+  // app is in the background or closed. The subscription endpoint belongs to the browser's
+  // push service; only this agent (VAPID key pair) can use it.
+  const pushSubscribed = useRef(false);
+  const subscribePush = async (publicKey: string) => {
+    const reg = await navigator.serviceWorker?.ready;
+    if (!reg?.pushManager) return false;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+    await client.request({ type: 'push_subscribe', subscription: sub.toJSON(), ua: navigator.userAgent.slice(0, 200) });
+    pushSubscribed.current = true;
+    return true;
   };
 
   const enableNotifications = async () => {
-    if (typeof Notification === 'undefined') return;
+    if (typeof Notification === 'undefined') {
+      dispatch({ type: 'toast', text: t('installForNotifications') });
+      return;
+    }
     const p = await Notification.requestPermission();
     setNotify(p === 'granted');
+    if (p !== 'granted') return;
+    let viaPush = false;
+    try {
+      const key = stateRef.current.agent?.push?.publicKey;
+      if (key) viaPush = await subscribePush(key);
+    } catch (err) {
+      dispatch({ type: 'toast', text: (err as Error).message, kind: 'error' });
+    }
+    dispatch({ type: 'toast', text: viaPush ? t('notificationsReady') : t('notificationsLocalOnly') });
   };
 
   // Title badge.
@@ -389,7 +481,18 @@ export default function App() {
     setConn(c);
   };
   const onForget = () => {
-    client.close();
+    // Stop push for this device before leaving: the agent would otherwise keep sending here.
+    navigator.serviceWorker
+      ?.getRegistration()
+      .then((reg) => reg?.pushManager.getSubscription())
+      .then(async (sub) => {
+        if (!sub) return;
+        await client.request({ type: 'push_unsubscribe', endpoint: sub.endpoint }).catch(() => {});
+        await sub.unsubscribe();
+      })
+      .catch(() => {})
+      .finally(() => client.close());
+    pushSubscribed.current = false;
     saveConnection(null);
     setConn(null);
     dispatch({ type: 'reset' });
@@ -431,7 +534,7 @@ export default function App() {
             {state.pending.length}
           </span>
         )}
-        {!notify && typeof Notification !== 'undefined' && (
+        {!notify && (
           <button className="btn ghost compact" onClick={enableNotifications} title={t('enableNotifications')}>
             🔔
           </button>
@@ -488,7 +591,9 @@ export default function App() {
             truncated={!!currentConv?.truncated}
             status={currentState?.status || 'idle'}
             source={currentState?.source}
+            held={!!currentState?.held}
             hookOnly={state.agent?.loggedIn === false && !!state.agent?.hooks.installed}
+            focusRequestId={focusRequestId}
             pending={currentPending}
             queued={state.queued[state.current] || 0}
             onSend={sendMessage}

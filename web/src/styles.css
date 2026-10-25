@@ -480,6 +480,8 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 }
 .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border-2); }
 .card.permission::before { background: var(--warn); }
+.highlight-wrap > .card { animation: card-flash 1.6s ease-out 1; }
+@keyframes card-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent), var(--shadow); } 100% { box-shadow: var(--shadow); } }
 .card.question::before { background: var(--info); }
 .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .card-head .tool-name { font-size: 15px; color: var(--text); }

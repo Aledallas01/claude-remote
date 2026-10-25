@@ -39,7 +39,8 @@ async function main() {
     payload = {};
   }
   const blocking = event === 'PermissionRequest' || (event === 'PreToolUse' && payload.tool_name === 'AskUserQuestion');
-  const timeoutMs = blocking ? (Number(cfg.hookWaitSeconds || 180) + 10) * 1000 : 3000;
+  // Stop may hold the session for a message from the web (see stopHoldSeconds).
+  const timeoutMs = blocking ? (Number(cfg.hookWaitSeconds || 180) + 10) * 1000 : event === 'Stop' ? (Number(cfg.stopHoldSeconds || 120) + 10) * 1000 : 3000;
   const body = JSON.stringify({ event, payload });
 
   await new Promise((resolve) => {
