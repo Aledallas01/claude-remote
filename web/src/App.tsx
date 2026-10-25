@@ -280,6 +280,10 @@ export default function App() {
           break;
         case 'result':
           if (m.isError) dispatch({ type: 'toast', text: `${t('turnError')}: ${String(m.result || '').slice(0, 200)}`, kind: 'error' });
+          else if (m.sessionId) notifyDone(m.sessionId, String(m.result || ''));
+          break;
+        case 'stopped':
+          if (m.sessionId) notifyDone(m.sessionId, String(m.lastAssistantMessage || ''));
           break;
         case 'error':
           dispatch({ type: 'toast', text: String(m.message || 'error'), kind: 'error' });
@@ -423,6 +427,32 @@ export default function App() {
         n.onclick = () => {
           window.focus();
           showRequest(req.sessionId, req.id);
+        };
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+
+  // A turn ended while the page is in the background: local notice (push covers the rest).
+  const notifyDone = (sessionId: string, text: string) => {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible' && document.hasFocus()) return;
+    if (pushSubscribed.current) return;
+    const title = stateRef.current.sessions.find((s) => s.id === sessionId)?.title || '';
+    const body = text.replace(/[#*`>_]/g, '').split('\n').map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 160) || '';
+    const data = { sessionId, requestId: null };
+    navigator.serviceWorker?.getRegistration().then((reg) => {
+      const head = title ? `${t('turnDone')} · ${title}` : t('turnDone');
+      if (reg) {
+        reg.showNotification(head, { body, tag: `done-${sessionId}`, icon: '/favicon.svg', data }).catch(() => {});
+        return;
+      }
+      try {
+        const n = new Notification(head, { body, tag: `done-${sessionId}` });
+        n.onclick = () => {
+          window.focus();
+          showRequest(sessionId, null);
         };
       } catch {
         /* ignore */

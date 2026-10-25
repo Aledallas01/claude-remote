@@ -413,8 +413,16 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .md blockquote { border-left: 3px solid var(--accent); margin: 0 0 10px; padding: 2px 12px; color: var(--text-2); }
 .md a { word-break: break-all; }
 .md hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
-.md table { border-collapse: collapse; margin: 0 0 10px; font-size: 13.5px; }
-.md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+/* Tables scroll sideways inside their own box instead of widening the page. */
+.md .table-wrap { overflow-x: auto; max-width: 100%; margin: 0 0 10px; border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
+.md .table-wrap:last-child { margin-bottom: 0; }
+.md table { border-collapse: collapse; font-size: 13.5px; min-width: 100%; }
+.md th, .md td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
+.md th:last-child, .md td:last-child { border-right: 0; }
+.md tbody tr:last-child td { border-bottom: 0; }
+.md th { background: var(--bg-3); font-weight: 600; color: var(--text-2); }
+.md td { white-space: normal; min-width: 90px; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--bg-3) 40%, transparent); }
 .code.diff-old { color: var(--err); background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); }
 .code.diff-new { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--bg-2)); }
 .code.result { max-height: 260px; }

@@ -22,22 +22,44 @@ interface RequestPush {
   session: string;
   detail: string;
 }
+interface DonePush {
+  type: 'done';
+  sessionId: string | null;
+  session: string;
+  detail: string;
+}
 
 const it = (navigator.language || '').toLowerCase().startsWith('it');
 const text = {
   question: it ? 'Claude ha una domanda' : 'Claude has a question',
   approve: it ? 'Approvazione richiesta' : 'Approval needed',
+  done: it ? 'Claude ha finito' : 'Claude finished',
 };
 
-// The agent pushes one message per pending permission prompt / question.
+// The agent pushes one message per pending permission prompt / question, and one when a
+// turn ends in a session that is being used from here.
 self.addEventListener('push', (event: PushEvent) => {
-  let data: RequestPush | null = null;
+  let data: RequestPush | DonePush | null = null;
   try {
-    data = event.data ? (event.data.json() as RequestPush) : null;
+    data = event.data ? (event.data.json() as RequestPush | DonePush) : null;
   } catch {
     data = null;
   }
-  if (!data || data.type !== 'request') return;
+  if (!data) return;
+  if (data.type === 'done') {
+    const url = `/?open=${encodeURIComponent(data.sessionId || '')}`;
+    event.waitUntil(
+      self.registration.showNotification(data.session ? `${text.done} · ${data.session}` : text.done, {
+        body: data.detail,
+        tag: `done-${data.sessionId || ''}`, // one per session: a newer turn replaces the older notice
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
+        data: { url, sessionId: data.sessionId, requestId: null },
+      } as NotificationOptions),
+    );
+    return;
+  }
+  if (data.type !== 'request') return;
   const title = data.kind === 'question' ? text.question : `${text.approve}: ${data.toolName}`;
   const body = [data.session, data.detail].filter(Boolean).join('\n');
   const url = `/?open=${encodeURIComponent(data.sessionId || '')}&req=${encodeURIComponent(data.requestId)}`;

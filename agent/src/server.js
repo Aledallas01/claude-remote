@@ -644,7 +644,25 @@ export class AgentServer {
       }
       this.store.findFile(payload.sessionId).then(() => this.store.markListDirty()).catch(() => {});
     }
+    // A turn ended in a session the web UI is using: tell the phone, even in the background.
+    if ((type === 'stopped' || type === 'result') && payload.sessionId && this.webActive(payload.sessionId)) {
+      const text = type === 'stopped' ? payload.lastAssistantMessage : payload.result;
+      this.pushDone(payload.sessionId, typeof text === 'string' ? text : '').catch((err) => this.log(`push: ${err.message}`));
+    }
     this.broadcast({ type, ...payload });
+  }
+
+  async pushDone(sessionId, text) {
+    if (!this.push || !this.push.count) return;
+    const meta = this.store.getMeta(sessionId);
+    const d = this.desktop.info(sessionId);
+    const detail = text.replace(/[#*`>_]/g, '').split('\n').map((l) => l.trim()).filter(Boolean)[0] || '';
+    await this.push.notify({
+      type: 'done',
+      sessionId,
+      session: (d?.title || meta?.title || '').slice(0, 80),
+      detail: detail.slice(0, 160),
+    });
   }
 
   send(ws, obj) {

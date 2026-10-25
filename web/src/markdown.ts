@@ -15,6 +15,22 @@ function inline(s: string) {
   return out;
 }
 
+// GitHub-style tables: a header row, a separator row (---, :--:, --:) and body rows, all
+// delimited by pipes. Cells are split on unescaped pipes; `\|` stays a literal pipe.
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+function splitRow(line: string): string[] {
+  const cells = line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.replace(/\\\|/g, '|').trim());
+  return cells;
+}
+function isTableStart(lines: string[], i: number) {
+  return i + 1 < lines.length && lines[i].includes('|') && TABLE_SEP.test(lines[i + 1]) && splitRow(lines[i]).length >= 2;
+}
+
 export function renderMarkdown(src: string): string {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   const html: string[] = [];
@@ -28,6 +44,19 @@ export function renderMarkdown(src: string): string {
   };
   while (i < lines.length) {
     const line = lines[i];
+    if (isTableStart(lines, i)) {
+      closeList();
+      const head = splitRow(line);
+      const aligns = splitRow(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? 'center' : /^-+:$/.test(c) ? 'right' : /^:-+$/.test(c) ? 'left' : ''));
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(splitRow(lines[i++]));
+      const attr = (k: number) => (aligns[k] ? ` style="text-align:${aligns[k]}"` : '');
+      const th = head.map((c, k) => `<th${attr(k)}>${inline(c)}</th>`).join('');
+      const body = rows.map((r) => `<tr>${head.map((_, k) => `<td${attr(k)}>${inline(r[k] ?? '')}</td>`).join('')}</tr>`).join('');
+      html.push(`<div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`);
+      continue;
+    }
     const fence = line.match(/^\s*```(\w+)?\s*$/);
     if (fence) {
       closeList();
@@ -80,7 +109,7 @@ export function renderMarkdown(src: string): string {
     closeList();
     const buf: string[] = [line];
     i++;
-    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|[-*•]\s|\d+[.)]\s|>)/.test(lines[i])) buf.push(lines[i++]);
+    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|[-*•]\s|\d+[.)]\s|>)/.test(lines[i]) && !isTableStart(lines, i)) buf.push(lines[i++]);
     html.push(`<p>${inline(buf.join('\n')).replace(/\n/g, '<br>')}</p>`);
   }
   closeList();
