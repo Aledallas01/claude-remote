@@ -17,6 +17,31 @@ import { handleHookEvent, hooksStatus } from './hooks.js';
 import { DesktopIndex } from './desktop.js';
 import { PushStore } from './push.js';
 import { configDir } from './config.js';
+import { execFile } from 'node:child_process';
+
+// Which Claude Code sessions have a live process right now, from the process list: the desktop
+// app resumes sessions with `--resume=<id>`, so those ids are visible. Cached for a few seconds.
+// Sessions started fresh carry no id on the command line; the hook states cover those.
+let processScan = { at: 0, ids: new Set(), count: 0 };
+function liveProcessSessions() {
+  if (Date.now() - processScan.at < 5000) return Promise.resolve(processScan);
+  return new Promise((resolve) => {
+    const done = (out) => {
+      const ids = new Set();
+      let count = 0;
+      for (const m of String(out || '').matchAll(/--resume[= ]"?([0-9a-f-]{36})/gi)) ids.add(m[1].toLowerCase());
+      for (const line of String(out || '').split('\n')) if (/stream-json/.test(line)) count++;
+      processScan = { at: Date.now(), ids, count };
+      resolve(processScan);
+    };
+    const opts = { timeout: 8000, maxBuffer: 16 * 1024 * 1024, windowsHide: true };
+    if (process.platform === 'win32') {
+      execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='claude.exe' or Name='node.exe'\" | ForEach-Object { $_.CommandLine }"], opts, (err, out) => done(err ? '' : out));
+    } else {
+      execFile('ps', ['-eo', 'args'], opts, (err, out) => done(err ? '' : out));
+    }
+  });
+}
 
 const WEB_ACTIVE_MS = 60 * 60 * 1000; // a session counts as "in use from the web" for this long
 
@@ -106,7 +131,10 @@ export class AgentServer {
     this.loggedIn = loggedIn;
     this.store = new TranscriptStore();
     this.hub = new RequestHub();
-    this.states = new Map(); // sessionId -> { status, source, cwd, updatedAt }
+    // sessionId -> { status, source, cwd, updatedAt, ... }. Hook-tracked states are kept on disk
+    // so a restart of the agent does not forget which sessions the PC has open.
+    this.statesFile = path.join(configDir(), 'states.json');
+    this.states = new Map(this.loadStates());
     this.queues = new QueueStore(path.join(configDir(), 'queues.json'), log); // sessionId -> [{ text, ts }] waiting for the hooks
     this.clients = new Set(); // authenticated sockets
     this.failures = new Map(); // ip -> [timestamps]
@@ -500,6 +528,38 @@ export class AgentServer {
   }
 
   // A session that hooks reported as open in another client recently (and not ended).
+  loadStates() {
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.statesFile, 'utf8'));
+      const cutoff = Date.now() - 12 * 60 * 60 * 1000;
+      return Object.entries(saved || {}).filter(([, s]) => s && s.source === 'hook' && new Date(s.updatedAt).getTime() > cutoff).map(([id, s]) => [id, { ...s, held: false }]);
+    } catch {
+      return [];
+    }
+  }
+
+  persistStates() {
+    clearTimeout(this.statesTimer);
+    this.statesTimer = setTimeout(() => {
+      try {
+        const obj = {};
+        for (const [id, s] of this.states) if (s.source === 'hook') obj[id] = s;
+        fs.mkdirSync(path.dirname(this.statesFile), { recursive: true });
+        fs.writeFileSync(this.statesFile, JSON.stringify(obj), { mode: 0o600 });
+      } catch (err) {
+        this.log(`cannot save session states: ${err.message}`);
+      }
+    }, 500);
+  }
+
+  // Does the desktop app (or a terminal) hold a process for this session? Hook state first,
+  // then the process list, which also covers sessions the agent never saw emit a hook.
+  async openOnPc(sessionId) {
+    if (this.isLiveElsewhere(sessionId)) return true;
+    const scan = await liveProcessSessions();
+    return scan.ids.has(sessionId.toLowerCase());
+  }
+
   isLiveElsewhere(sessionId) {
     const s = this.states.get(sessionId);
     if (!s || s.source !== 'hook' || s.status === 'ended') return false;
@@ -561,7 +621,9 @@ export class AgentServer {
           // Without a CLI login the SDK cannot resume an idle session either, so the message is
           // queued the same way and reaches Claude the next time that session runs on the PC.
           this.markWebActivity(sessionId, { sent: true });
-          const live = this.isLiveElsewhere(sessionId);
+          // Never resume with the SDK a session the PC still holds: its process would not see the
+          // new turn and the conversation would fork. Such sessions always go through the hooks.
+          const live = await this.openOnPc(sessionId);
           if (live || (this.loggedIn === false && hooksStatus().installed)) {
             const q = this.queues.get(sessionId) || [];
             q.push({ text, ts: new Date().toISOString() });
@@ -666,7 +728,8 @@ export class AgentServer {
   onRunnerEvent(type, payload) {
     if (type === 'status' && payload.sessionId) {
       if (payload.status === 'ended') this.states.delete(payload.sessionId);
-      else {
+      if (payload.source === 'hook' || this.states.get(payload.sessionId)?.source === 'hook') this.persistStates();
+      if (payload.status !== 'ended') {
         const prev = this.states.get(payload.sessionId) || {};
         this.states.set(payload.sessionId, {
           ...prev,
