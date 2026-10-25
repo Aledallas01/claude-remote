@@ -160,7 +160,69 @@ function fmtTime(ts: string) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Consecutive tool calls (and thinking) in an assistant turn collapse into one row,
+// "Used N tools", like the Claude Code transcript. Text always stays visible.
+type Run = { kind: 'text'; block: Block; key: string } | { kind: 'tools'; blocks: Block[]; key: string };
+
+function splitRuns(items: Msg[]): Run[] {
+  const runs: Run[] = [];
+  items.forEach((m, i) => {
+    m.blocks.forEach((b, j) => {
+      const key = `${m.uuid || i}:${j}`;
+      if (b.type === 'tool_result') return;
+      const isTool = b.type === 'tool_use' || (b.type === 'thinking' && !!b.text);
+      if (!isTool) {
+        runs.push({ kind: 'text', block: b, key });
+        return;
+      }
+      const last = runs[runs.length - 1];
+      if (last && last.kind === 'tools') last.blocks.push(b);
+      else runs.push({ kind: 'tools', blocks: [b], key });
+    });
+  });
+  return runs;
+}
+
+function ToolRun({ blocks, results, t }: { blocks: Block[]; results: Map<string, Block & { type: 'tool_result' }>; t: T }) {
+  const tools = blocks.filter((b): b is Block & { type: 'tool_use' } => b.type === 'tool_use');
+  if (tools.length < 2) {
+    return (
+      <>
+        {blocks.map((b, i) => (
+          <BlockView key={i} block={b} results={results} t={t} />
+        ))}
+      </>
+    );
+  }
+  const errors = tools.filter((b) => results.get(b.id)?.isError).length;
+  const pending = tools.filter((b) => !results.has(b.id)).length;
+  const names = [...new Set(tools.map((b) => b.name))];
+  const shown = names.slice(0, 4).join(', ') + (names.length > 4 ? ', …' : '');
+  const state = errors ? 'is-error' : pending ? 'pending' : 'ok';
+  return (
+    <details className={`tool run ${state}`}>
+      <summary>
+        <span className="mark">⏺</span>
+        <span className="tool-line">
+          <span className="tool-name">{t('usedTools').replace('{n}', String(tools.length))}</span>
+          <span className="tool-summary">
+            {shown}
+            {errors > 0 && ` · ${errors} ${t('errorsShort')}`}
+          </span>
+          <span className="tool-chev">▸</span>
+        </span>
+      </summary>
+      <div className="run-body">
+        {blocks.map((b, i) => (
+          <BlockView key={i} block={b} results={results} t={t} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export const MessageGroup = memo(function MessageGroup({ group, results, t }: { group: Group; results: Map<string, Block & { type: 'tool_result' }>; t: T }) {
+  const runs = group.role === 'assistant' ? splitRuns(group.items) : null;
   return (
     <div className={`msg ${group.role}`}>
       <div className="msg-meta">
@@ -168,13 +230,15 @@ export const MessageGroup = memo(function MessageGroup({ group, results, t }: { 
         <span className="time">{fmtTime(group.ts)}</span>
       </div>
       <div className="bubble">
-        {group.items.map((m, i) => (
-          <div key={m.uuid || i} className={m.optimistic ? 'optimistic' : ''}>
-            {m.blocks.map((b, j) => (
-              <BlockView key={j} block={b} results={results} t={t} />
+        {runs
+          ? runs.map((r) => (r.kind === 'text' ? <BlockView key={r.key} block={r.block} results={results} t={t} /> : <ToolRun key={r.key} blocks={r.blocks} results={results} t={t} />))
+          : group.items.map((m, i) => (
+              <div key={m.uuid || i} className={m.optimistic ? 'optimistic' : ''}>
+                {m.blocks.map((b, j) => (
+                  <BlockView key={j} block={b} results={results} t={t} />
+                ))}
+              </div>
             ))}
-          </div>
-        ))}
       </div>
     </div>
   );

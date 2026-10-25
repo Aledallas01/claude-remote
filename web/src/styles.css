@@ -53,6 +53,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+html, body { overflow: hidden; overscroll-behavior: none; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -198,7 +199,8 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .seg { display: flex; background: var(--bg-3); border: 1px solid var(--border); border-radius: 9px; padding: 2px; gap: 2px; }
 .seg button { flex: 1; border: 0; background: none; border-radius: 7px; padding: 4px 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--bg-4); color: var(--text); font-weight: 500; }
-.session-list { overflow-y: auto; flex: 1; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+/* overscroll-behavior: reaching the end of the list must not scroll the conversation behind it. */
+.session-list { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; flex: 1; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 2px; }
 .group { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .group-head {
   position: sticky;
@@ -284,7 +286,7 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .status.waiting { color: var(--warn); }
 .status.waiting::before { background: var(--warn); animation: pulse 1.2s infinite; }
 .status.idle::before { background: var(--ok); }
-.scroll { flex: 1; overflow-y: auto; padding: 18px 20px 12px; display: flex; flex-direction: column; gap: 18px; }
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 18px 20px 12px; display: flex; flex-direction: column; gap: 18px; }
 .scroll > * { width: 100%; max-width: 860px; margin-inline: auto; }
 .new-session { display: flex; flex-direction: column; gap: 10px; }
 .projects { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -382,12 +384,19 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .tool .mark { color: var(--muted); }
 .tool.ok .mark { color: var(--ok); }
 .tool.is-error .mark { color: var(--err); }
-.tool-line { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.tool-line { display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow: hidden; }
+.tool > summary, .tool-body, .run-body, .turn, .bubble, .msg { min-width: 0; max-width: 100%; }
 .tool-name { font-weight: 600; font-size: 13.5px; color: var(--text-2); }
 .tool-summary { color: var(--muted); font-size: 12.5px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool-chev { color: var(--muted); font-size: 11px; transition: transform 0.15s; flex: none; }
 .tool[open] .tool-chev { transform: rotate(90deg); }
 .tool-body { padding: 4px 0 6px 28px; display: flex; flex-direction: column; gap: 6px; }
+/* A collapsed run of tool calls: the summary line stays, the list opens underneath,
+   indented and tied together by a thin rule like nested output in the terminal. */
+.tool.run > summary .tool-name { color: var(--text-2); }
+.tool.run > summary .tool-summary { font-family: var(--sans); }
+.run-body { margin: 2px 0 4px 8px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.run-body .tool > summary { padding-left: 0; }
 .tool-body .code { margin: 0; }
 .result-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .result-head .elbow { font-family: var(--mono); color: var(--border-2); }
@@ -515,7 +524,11 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
     box-shadow: var(--shadow);
   }
   .sidebar-open .sidebar { transform: none; }
-  .sidebar-open .backdrop { display: block; position: fixed; inset: 46px 0 0 0; background: rgba(0, 0, 0, 0.45); z-index: 20; }
+  .sidebar-open .backdrop { display: block; position: fixed; inset: 46px 0 0 0; background: rgba(0, 0, 0, 0.45); z-index: 20; touch-action: none; }
+  /* While the drawer is open the conversation must not move under the finger. */
+  .sidebar-open .main { overflow: hidden; touch-action: none; }
+  .sidebar-open .scroll { overflow: hidden; }
+  .sidebar { touch-action: pan-y; overscroll-behavior: contain; }
   .msg.user .bubble { max-width: 92%; }
   .scroll { padding: 12px 12px 8px; gap: 14px; }
   .chat-head { padding: 10px 12px; }
