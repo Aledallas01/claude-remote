@@ -488,6 +488,7 @@ export default function App() {
             truncated={!!currentConv?.truncated}
             status={currentState?.status || 'idle'}
             source={currentState?.source}
+            hookOnly={state.agent?.loggedIn === false && !!state.agent?.hooks.installed}
             pending={currentPending}
             queued={state.queued[state.current] || 0}
             onSend={sendMessage}

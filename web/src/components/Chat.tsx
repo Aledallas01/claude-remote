@@ -7,10 +7,11 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, queued = 0, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, status, source, pending, queued = 0, hookOnly = false, onSend, onInterrupt, onUnqueue, onAnswer }: {
   t: T;
   meta?: SessionMeta;
   isNew?: boolean;
+  hookOnly?: boolean; // the PC cannot start Claude from here (no CLI login): messages always go through the hooks
   draftCwd?: string;
   projects?: Project[];
   messages: Msg[];
@@ -26,7 +27,7 @@ export function Chat({ t, meta, isNew, draftCwd, projects, messages, partial, lo
   onUnqueue?: () => void;
   onAnswer: (req: PendingRequest, a: Answer) => void;
 }) {
-  const liveElsewhere = source === 'hook' && !isNew;
+  const liveElsewhere = (source === 'hook' || hookOnly) && !isNew;
   const [text, setText] = useState('');
   const [mode, setMode] = useState<(typeof MODES)[number]>(() => {
     try {

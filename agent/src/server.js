@@ -379,16 +379,23 @@ export class AgentServer {
           if (meta?.cwd) cwd = meta.cwd;
           // Session open in a terminal / the desktop app: deliver through the hooks (no credentials
           // needed, and the terminal owns the conversation so the SDK must not resume it).
-          if (this.isLiveElsewhere(sessionId)) {
+          // Without a CLI login the SDK cannot resume an idle session either, so the message is
+          // queued the same way and reaches Claude the next time that session runs on the PC.
+          const live = this.isLiveElsewhere(sessionId);
+          if (live || (this.loggedIn === false && hooksStatus().installed)) {
             const q = this.queues.get(sessionId) || [];
             q.push({ text, ts: new Date().toISOString() });
             this.queues.set(sessionId, q);
             this.broadcast({ type: 'queued', sessionId, count: q.length });
-            return this.send(ws, { type: 'ok', reqId, sessionId, delivery: 'hook', queued: q.length });
+            return this.send(ws, { type: 'ok', reqId, sessionId, delivery: 'hook', queued: q.length, live });
           }
         }
         if (this.loggedIn === false) {
-          throw new Error('Claude Code CLI is not logged in on the PC: run "claude login" once to start sessions from here. Messages to sessions running on the PC are delivered through the hooks instead.');
+          throw new Error(
+            sessionId
+              ? 'Claude Code CLI is not logged in on the PC and the hooks are not installed, so this message cannot be delivered. Run the agent with --install-hooks, or "claude login" once.'
+              : 'Claude Code CLI is not logged in on the PC: run "claude login" once to start new sessions from here. Messages to existing sessions are delivered through the hooks instead.',
+          );
         }
         if (!cwd) throw new Error('a project folder (cwd) is required for a new session');
         if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(`folder not found on this PC: ${cwd}`);
