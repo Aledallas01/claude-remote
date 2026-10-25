@@ -251,7 +251,9 @@ export class AgentServer {
     // Claude Code kills a hook that exceeds its configured timeout; the relay then closes this
     // request. A decision produced after that would be lost, so long waits watch this signal.
     const ac = new AbortController();
-    req.on('close', () => {
+    // 'close' on the response fires when the connection drops before the reply is sent
+    // (on the request it only means the body was consumed).
+    res.on('close', () => {
       if (!res.writableEnded) ac.abort();
     });
     let out = {};
