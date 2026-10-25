@@ -267,15 +267,49 @@ function PlanCard({ items }: { items: PlanItem[] }) {
   );
 }
 
-function RecapCard({ input, t }: { input: Record<string, unknown>; t: T }) {
-  const recap = typeof input.recap === 'string' ? input.recap : '';
-  const ask = typeof input.ask === 'string' ? input.ask : '';
-  if (!recap && !ask) return null;
+// The end-of-turn box (recap, question, reply buttons). Like in the app it belongs to the
+// latest turn only: it is shown under the last message, not where the call happened.
+export interface Recap {
+  recap: string;
+  ask: string;
+  actions: { label: string; message: string }[];
+}
+
+export function lastRecap(messages: Msg[]): Recap | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user' && m.blocks.some((b) => b.type === 'text' && b.text.trim())) return null; // a newer turn started
+    if (m.role !== 'assistant') continue;
+    for (let j = m.blocks.length - 1; j >= 0; j--) {
+      const b = m.blocks[j];
+      if (b.type !== 'tool_use' || !RECAP_TOOL.test(b.name)) continue;
+      const input = b.input as { recap?: string; ask?: string; actions?: { label?: string; message?: string; action?: string }[] };
+      const actions = (Array.isArray(input.actions) ? input.actions : [])
+        .filter((a) => a && typeof a.label === 'string' && a.label.trim() && !a.action) // app-only actions (commit, PR…) have no equivalent here
+        .map((a) => ({ label: String(a.label), message: String(a.message || a.label) }));
+      const recap = typeof input.recap === 'string' ? input.recap : '';
+      const ask = typeof input.ask === 'string' ? input.ask : '';
+      return recap || ask ? { recap, ask, actions } : null;
+    }
+  }
+  return null;
+}
+
+export function RecapBox({ recap, t, onReply }: { recap: Recap; t: T; onReply: (text: string) => void }) {
   return (
     <div className="recap-card">
       <div className="recap-label">{t('recap')}</div>
-      {recap && <div>{recap}</div>}
-      {ask && <div className="recap-ask">{ask}</div>}
+      {recap.recap && <div>{recap.recap}</div>}
+      {recap.ask && <div className="recap-ask">{recap.ask}</div>}
+      {recap.actions.length > 0 && (
+        <div className="recap-actions">
+          {recap.actions.map((a, i) => (
+            <button key={i} className={`btn ${i === 0 ? 'primary' : ''}`} onClick={() => onReply(a.message)}>
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -324,7 +358,7 @@ export function relativeTime(ts: string, lang: Lang, now = Date.now()) {
 
 // Assistant turns: text flows in the page; consecutive actions fold into one summary line;
 // plan updates and recaps get their own cards.
-type Run = { kind: 'text'; block: Block; key: string } | { kind: 'tools'; blocks: Block[]; key: string } | { kind: 'plan'; id: string; key: string } | { kind: 'recap'; input: Record<string, unknown>; key: string };
+type Run = { kind: 'text'; block: Block; key: string } | { kind: 'tools'; blocks: Block[]; key: string } | { kind: 'plan'; id: string; key: string };
 
 function splitRuns(items: Msg[]): Run[] {
   const runs: Run[] = [];
@@ -336,10 +370,7 @@ function splitRuns(items: Msg[]): Run[] {
         runs.push({ kind: 'plan', id: b.id, key });
         return;
       }
-      if (b.type === 'tool_use' && RECAP_TOOL.test(b.name)) {
-        runs.push({ kind: 'recap', input: b.input, key });
-        return;
-      }
+      if (b.type === 'tool_use' && RECAP_TOOL.test(b.name)) return; // shown once, under the last message (RecapBox)
       const isTool = b.type === 'tool_use' || b.type === 'thinking';
       if (!isTool) {
         runs.push({ kind: 'text', block: b, key });
@@ -381,8 +412,6 @@ export const MessageGroup = memo(function MessageGroup({ group, results, plans, 
             const items = plans.get(r.id);
             return items && items.length ? <PlanCard key={r.key} items={items} /> : null;
           }
-          case 'recap':
-            return <RecapCard key={r.key} input={r.input} t={t} />;
           default:
             return null;
         }

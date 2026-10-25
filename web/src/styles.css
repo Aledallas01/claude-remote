@@ -359,9 +359,10 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .plan-item.in_progress .plan-icon { color: var(--text-2); }
 
 /* Recap card (end-of-turn summary) */
-.recap-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 14px; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; }
+.recap-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 14px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; background: var(--bg-3); }
 .recap-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-.recap-ask { color: var(--text); }
+.recap-ask { color: var(--text); font-weight: 600; }
+.recap-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 2px; }
 
 /* "••• Working 13min 52s" line while a turn is in progress */
 .working { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 2px 0; }

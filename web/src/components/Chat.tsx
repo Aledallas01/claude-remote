@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Msg, PendingRequest, Project, SessionMeta } from '../types';
 import type { T, Lang } from '../i18n';
-import { collectResults, groupMessages, MessageGroup, planSnapshots } from './Messages';
+import { collectResults, groupMessages, lastRecap, MessageGroup, planSnapshots, RecapBox } from './Messages';
 import { RequestCard, type Answer } from './Requests';
 import { renderMarkdown } from '../markdown';
 
@@ -49,6 +49,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
   const groups = useMemo(() => groupMessages(messages), [messages]);
   const results = useMemo(() => collectResults(messages), [messages]);
   const plans = useMemo(() => planSnapshots(messages), [messages]);
+  const recap = useMemo(() => (isNew ? null : lastRecap(messages)), [messages, isNew]);
   const partialHtml = useMemo(() => (partial ? renderMarkdown(partial) : ''), [partial]);
 
   // Elapsed time of the current turn, ticking once a second while Claude works.
@@ -174,6 +175,16 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
         {pending.map((p) => (
           <RequestCard key={p.id} req={p} t={t} onAnswer={(a) => onAnswer(p, a)} highlight={p.id === focusRequestId} />
         ))}
+        {recap && status !== 'running' && pending.length === 0 && (
+          <RecapBox
+            recap={recap}
+            t={t}
+            onReply={(text) => {
+              stick.current = true;
+              onSend(text, mode).catch((err) => alert((err as Error).message));
+            }}
+          />
+        )}
       </div>
 
       <div className="composer">

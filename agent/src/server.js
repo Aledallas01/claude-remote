@@ -16,8 +16,53 @@ import { RunnerManager } from './runner.js';
 import { handleHookEvent, hooksStatus } from './hooks.js';
 import { DesktopIndex } from './desktop.js';
 import { PushStore } from './push.js';
+import { configDir } from './config.js';
 
 const WEB_ACTIVE_MS = 60 * 60 * 1000; // a session counts as "in use from the web" for this long
+
+// Messages waiting to be delivered through the hooks, kept on disk so an agent restart does
+// not lose them. Entries older than a day are dropped on load.
+class QueueStore extends Map {
+  constructor(file, log) {
+    super();
+    this.file = file;
+    this.log = log || (() => {});
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      for (const [id, list] of Object.entries(saved || {})) {
+        const fresh = (Array.isArray(list) ? list : []).filter((m) => m && typeof m.text === 'string' && new Date(m.ts).getTime() > cutoff);
+        if (fresh.length) super.set(id, fresh);
+      }
+      if (this.size) this.log(`restored ${this.size} queued conversation(s) from disk`);
+    } catch {
+      /* no saved queue */
+    }
+  }
+
+  persist() {
+    try {
+      const obj = {};
+      for (const [id, list] of this) if (list.length) obj[id] = list;
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(this.file, JSON.stringify(obj), { mode: 0o600 });
+    } catch (err) {
+      this.log(`cannot save queue: ${err.message}`);
+    }
+  }
+
+  set(k, v) {
+    super.set(k, v);
+    this.persist();
+    return this;
+  }
+
+  delete(k) {
+    const r = super.delete(k);
+    if (r) this.persist();
+    return r;
+  }
+}
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const AUTH_TIMEOUT_MS = 8000;
@@ -62,7 +107,7 @@ export class AgentServer {
     this.store = new TranscriptStore();
     this.hub = new RequestHub();
     this.states = new Map(); // sessionId -> { status, source, cwd, updatedAt }
-    this.queues = new Map(); // sessionId -> [{ text, ts }] messages waiting to be delivered through hooks
+    this.queues = new QueueStore(path.join(configDir(), 'queues.json'), log); // sessionId -> [{ text, ts }] waiting for the hooks
     this.clients = new Set(); // authenticated sockets
     this.failures = new Map(); // ip -> [timestamps]
     this.webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
@@ -203,6 +248,12 @@ export class AgentServer {
     }
     const event = String(parsed?.event || '');
     const payload = parsed?.payload && typeof parsed.payload === 'object' ? parsed.payload : {};
+    // Claude Code kills a hook that exceeds its configured timeout; the relay then closes this
+    // request. A decision produced after that would be lost, so long waits watch this signal.
+    const ac = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) ac.abort();
+    });
     let out = {};
     try {
       out = await handleHookEvent(event, payload, {
@@ -212,13 +263,15 @@ export class AgentServer {
         emit: (type, p) => this.onRunnerEvent(type, p),
         clientCount: () => this.clients.size,
         webActive: (id) => this.webActive(id),
-        waitForQueued: (id, ms) => this.waitForQueued(id, ms),
+        waitForQueued: (id, ms) => this.waitForQueued(id, ms, ac.signal),
+        signal: ac.signal,
         cfg: this.cfg,
         log: this.log,
       });
     } catch (err) {
       this.log(`hook ${event} failed: ${err.message}`);
     }
+    if (ac.signal.aborted) return; // nobody is listening any more
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(out || {}));
   }
@@ -347,10 +400,11 @@ export class AgentServer {
     return !!t && Date.now() - t < WEB_ACTIVE_MS;
   }
 
-  // Resolves true as soon as a message is queued for the session, false after `ms` or when
-  // the last web client leaves (then holding the terminal makes no sense).
-  waitForQueued(sessionId, ms) {
+  // Resolves true as soon as a message is queued for the session, false after `ms`, when the
+  // last web client leaves (holding the terminal makes no sense then) or when the hook is gone.
+  waitForQueued(sessionId, ms, signal) {
     if ((this.queues.get(sessionId) || []).length) return Promise.resolve(true);
+    if (signal?.aborted) return Promise.resolve(false);
     return new Promise((resolve) => {
       let done = false;
       const finish = (v) => {
@@ -358,9 +412,12 @@ export class AgentServer {
         done = true;
         clearTimeout(timer);
         clearInterval(poll);
+        signal?.removeEventListener('abort', onAbort);
         if (this.queueWaiters.get(sessionId) === finish) this.queueWaiters.delete(sessionId);
         resolve(v);
       };
+      const onAbort = () => finish(false);
+      signal?.addEventListener('abort', onAbort);
       const timer = setTimeout(() => finish(false), ms);
       const poll = setInterval(() => {
         if (this.clients.size === 0) finish(false);

@@ -150,10 +150,11 @@ export async function handleHookEvent(event, payload, ctx) {
       // Messages sent from the web while the user was away ride along as extra context.
       const queued = takeQueued(ctx, sessionId);
       if (!queued) return {};
+      ctx.log(`UserPromptSubmit ${sessionId.slice(0, 8)}: attaching ${queued.count} queued message(s)`);
       return {
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: `The user also sent the following message(s) from Claude Remote (web) before this prompt. Treat them as part of the user's instructions:\n\n${queued}`,
+          additionalContext: `The user also sent the following message(s) from Claude Remote (web) before this prompt. Treat them as part of the user's instructions:\n\n${queued.text}`,
         },
       };
     }
@@ -162,23 +163,36 @@ export async function handleHookEvent(event, payload, ctx) {
       // A message queued from the web is delivered as the next instruction: blocking the stop
       // with a reason makes Claude continue with that text, using the session's own credentials.
       const deliver = (text) => ({ decision: 'block', reason: `The user sent this message from Claude Remote (web). Continue with it as the next instruction:\n\n${text}` });
+      const short = sessionId.slice(0, 8);
       let queued = takeQueued(ctx, sessionId);
       if (queued) {
+        ctx.log(`Stop ${short}: delivering ${queued.count} queued message(s)`);
         touch('running');
-        return deliver(queued);
+        return deliver(queued.text);
       }
       // Nobody typed yet. If the web UI has been using this session recently and someone is
       // connected, keep the hook open for a while: a message sent from the phone in that window
       // reaches Claude at once instead of waiting for the next terminal prompt.
       const holdMs = Math.max(0, Number(ctx.cfg.stopHoldSeconds ?? 120)) * 1000;
       if (holdMs > 0 && ctx.clientCount() > 0 && ctx.webActive?.(sessionId)) {
+        ctx.log(`Stop ${short}: holding for up to ${Math.round(holdMs / 1000)}s`);
         touch('idle', { held: true });
+        const t0 = Date.now();
         const got = await ctx.waitForQueued(sessionId, holdMs);
-        queued = got ? takeQueued(ctx, sessionId) : '';
-        if (queued) {
-          touch('running');
-          return deliver(queued);
+        if (ctx.signal?.aborted) {
+          // Claude Code ended the hook (its timeout is shorter than the hold): leave the queue
+          // untouched so the message is delivered at the next turn instead of vanishing.
+          ctx.log(`Stop ${short}: hook closed by Claude Code after ${Math.round((Date.now() - t0) / 1000)}s (hook timeout shorter than stopHoldSeconds; restart that session to apply the new hooks)`);
+          touch('idle');
+          return {};
         }
+        queued = got ? takeQueued(ctx, sessionId) : null;
+        if (queued) {
+          ctx.log(`Stop ${short}: delivering ${queued.count} message(s) after ${Math.round((Date.now() - t0) / 1000)}s hold`);
+          touch('running');
+          return deliver(queued.text);
+        }
+        ctx.log(`Stop ${short}: hold ended, nothing to deliver`);
       }
       touch('idle');
       return {};
@@ -203,15 +217,15 @@ export async function handleHookEvent(event, payload, ctx) {
   }
 }
 
-// Pops every message queued for the session and returns them as one text (or '' when none).
+// Pops every message queued for the session; returns { text, count } or null when none.
 function takeQueued(ctx, sessionId) {
-  if (!sessionId || !ctx.queues) return '';
+  if (!sessionId || !ctx.queues) return null;
   const q = ctx.queues.get(sessionId);
-  if (!q || !q.length) return '';
+  if (!q || !q.length) return null;
   ctx.queues.delete(sessionId);
   ctx.emit('queued', { sessionId, count: 0 });
   ctx.emit('delivered', { sessionId, count: q.length });
-  return q.map((m) => m.text).join('\n\n---\n\n');
+  return { text: q.map((m) => m.text).join('\n\n---\n\n'), count: q.length };
 }
 
 async function permissionFromHook(payload, sessionId, cwd, touch, ctx) {
