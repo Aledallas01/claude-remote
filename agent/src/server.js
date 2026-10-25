@@ -166,7 +166,8 @@ export class AgentServer {
     const ext = path.extname(file).toLowerCase();
     res.writeHead(200, {
       'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      // Hashed assets live forever; the page, the service worker and the manifest must revalidate.
+      'cache-control': /^\/assets\//.test(rel) ? 'public, max-age=31536000, immutable' : 'no-cache',
     });
     fs.createReadStream(file).pipe(res);
   }
