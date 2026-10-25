@@ -24,7 +24,7 @@ messages, from any browser or phone, while Claude keeps running on your own PC.
 | **Approve / deny tool calls** | Permission prompts (Bash, Edit, Write, MCP tools…) appear as cards: *Allow*, *Allow always*, *Deny with a reason*. |
 | **Answer questions** | `AskUserQuestion` prompts are rendered with their options, multi-select and a free-text "Other". |
 | **Send messages** | To a session running on the PC: the message is handed to Claude through the hooks as soon as the current turn ends (no credentials involved). To an idle session, or to start a new one in a project folder: the agent runs Claude itself, with *Ask me* / *Auto-accept edits* / *Plan* permission modes and a Stop button. |
-| **Sessions you run elsewhere** | With the hooks, sessions started in a terminal or in the Claude desktop app show up live, their prompts can be answered from the web and they receive your messages. After a turn ends in a session you are using from the web, the Stop hook keeps it reachable for `stopHoldSeconds` (default 120): a message sent in that window reaches Claude immediately, otherwise it is delivered when the session next runs. |
+| **Sessions you run elsewhere** | With the hooks, sessions started in a terminal or in the Claude desktop app show up live, their prompts can be answered from the web and they receive your messages. After a turn ends in a session that the phone is driving (your last message came from the web), the Stop hook keeps it reachable for `--stop-hold` seconds (default 120): a message sent in that window reaches Claude immediately. The hold ends at once if you type in the app, and otherwise the message is delivered when the session next runs. |
 | **Notifications** | Tap the bell once: permission prompts and questions arrive as push notifications, also with the app in the background or closed. Tapping one opens the right chat on that request. On iPhone add the page to the Home Screen first (Share → Add to Home Screen). |
 
 ## Quick start (Windows)
@@ -63,6 +63,8 @@ node src/index.js [options]
                       one link per interface (same Wi-Fi / Tailscale, no DNS or tunnel needed)
   --web <url>         web UI base URL used in the printed link (default: the hosted one)
   --hook-wait <sec>   how long a terminal session waits for a web answer (default 180)
+  --stop-hold <sec>   how long a session driven from the web stays reachable after a turn
+                      (default 120, 0 disables; re-run --install-hooks after changing it)
   --install-hooks     add the hooks to ~/.claude/settings.json and exit
   --uninstall-hooks   remove them and exit
   --rotate-token      new access token (old links stop working)

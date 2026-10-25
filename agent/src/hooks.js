@@ -152,7 +152,10 @@ export async function handleHookEvent(event, payload, ctx) {
       ctx.emit('prompt_submitted', { sessionId, cwd, prompt: String(payload.prompt || '').slice(0, 2000) });
       // Messages sent from the web while the user was away ride along as extra context.
       const queued = takeQueued(ctx, sessionId);
-      if (!queued) return {};
+      if (!queued) {
+        ctx.markAppPrompt?.(sessionId); // typed in the app / terminal: the PC is driving now
+        return {};
+      }
       ctx.log(`UserPromptSubmit ${sessionId.slice(0, 8)}: attaching ${queued.count} queued message(s)`);
       return {
         hookSpecificOutput: {
@@ -173,11 +176,13 @@ export async function handleHookEvent(event, payload, ctx) {
         touch('running');
         return deliver(queued.text);
       }
-      // Nobody typed yet. If the web UI has been using this session recently and someone is
-      // connected, keep the hook open for a while: a message sent from the phone in that window
-      // reaches Claude at once instead of waiting for the next terminal prompt.
+      // Nobody typed yet. If the phone is the one driving this session and someone is connected,
+      // keep the hook open for a while: a message sent from the phone in that window reaches
+      // Claude at once instead of waiting for the next terminal prompt. The hold ends early when
+      // the user types in the app, so the PC never waits on the phone.
       const holdMs = Math.max(0, Number(ctx.cfg.stopHoldSeconds ?? 120)) * 1000;
-      if (holdMs > 0 && ctx.clientCount() > 0 && ctx.webActive?.(sessionId)) {
+      const driving = ctx.webDriving ? ctx.webDriving(sessionId) : ctx.webActive?.(sessionId);
+      if (holdMs > 0 && ctx.clientCount() > 0 && driving) {
         ctx.log(`Stop ${short}: holding for up to ${Math.round(holdMs / 1000)}s`);
         touch('idle', { held: true });
         const t0 = Date.now();
@@ -195,7 +200,7 @@ export async function handleHookEvent(event, payload, ctx) {
           touch('running');
           return deliver(queued.text);
         }
-        ctx.log(`Stop ${short}: hold ended, nothing to deliver`);
+        ctx.log(`Stop ${short}: hold ended after ${Math.round((Date.now() - t0) / 1000)}s, nothing to deliver`);
       }
       touch('idle');
       return {};

@@ -135,7 +135,14 @@ export class DesktopIndex extends EventEmitter {
         try {
           const j = JSON.parse(await fsp.readFile(file, 'utf8'));
           if (j && typeof j.cliSessionId === 'string' && typeof j.sessionId === 'string') {
-            entry = { appId: j.sessionId, cli: j.cliSessionId, title: typeof j.title === 'string' ? j.title.trim() : '', archived: !!j.isArchived };
+            entry = {
+              appId: j.sessionId,
+              cli: j.cliSessionId,
+              title: typeof j.title === 'string' ? j.title.trim() : '',
+              archived: !!j.isArchived,
+              // When the user submits a prompt in the app (even while a hook is still running).
+              userFrameAt: Number(j.latestUserFrameAt) || 0,
+            };
           }
         } catch {
           entry = null; // partially written: picked up on the next change
@@ -152,6 +159,7 @@ export class DesktopIndex extends EventEmitter {
         section: section && sectionIds.has(section) ? section : null,
         archived: e.archived,
         pinned: starred.has(e.appId),
+        userFrameAt: e.userFrameAt,
       });
     }
     for (const file of this.fileCache.keys()) if (!live.has(file)) this.fileCache.delete(file);
@@ -182,7 +190,8 @@ export class DesktopIndex extends EventEmitter {
     this.available = available;
     this.sections = sections;
     this.bySession = bySession;
-    const signature = JSON.stringify([available, sections, [...bySession.entries()]]);
+    // userFrameAt changes at every prompt; it must not trigger a session-list broadcast.
+    const signature = JSON.stringify([available, sections, [...bySession.entries()].map(([k, v]) => [k, v.appId, v.title, v.section, v.archived, v.pinned])]);
     if (signature !== this.lastSignature) {
       const first = !this.lastSignature;
       this.lastSignature = signature;

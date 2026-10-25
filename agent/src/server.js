@@ -117,6 +117,8 @@ export class AgentServer {
       log,
     });
     this.webActivity = new Map(); // sessionId -> last time a web client opened / wrote to it
+    this.webSends = new Map(); // sessionId -> last time a message was sent from the web
+    this.appPrompts = new Map(); // sessionId -> last time a prompt was typed in the app / terminal
     this.queueWaiters = new Map(); // sessionId -> resolve(), a Stop hook holding the session
     try {
       this.push = new PushStore(cfg, { log });
@@ -273,6 +275,8 @@ export class AgentServer {
         emit: (type, p) => this.onRunnerEvent(type, p),
         clientCount: () => this.clients.size,
         webActive: (id) => this.webActive(id),
+        webDriving: (id) => this.webDriving(id),
+        markAppPrompt: (id) => this.markAppPrompt(id),
         waitForQueued: (id, ms) => this.waitForQueued(id, ms, ac.signal),
         signal: ac.signal,
         cfg: this.cfg,
@@ -401,8 +405,14 @@ export class AgentServer {
 
   // ---------- web activity / Stop hold ----------
 
-  markWebActivity(sessionId) {
-    if (sessionId) this.webActivity.set(sessionId, Date.now());
+  markWebActivity(sessionId, { sent = false } = {}) {
+    if (!sessionId) return;
+    this.webActivity.set(sessionId, Date.now());
+    if (sent) this.webSends.set(sessionId, Date.now());
+  }
+
+  markAppPrompt(sessionId) {
+    if (sessionId) this.appPrompts.set(sessionId, Date.now());
   }
 
   webActive(sessionId) {
@@ -410,11 +420,30 @@ export class AgentServer {
     return !!t && Date.now() - t < WEB_ACTIVE_MS;
   }
 
+  // Is the phone the one driving this session right now? True when the last message came from
+  // the web, or the web opened the session in the last few minutes and nobody typed in the app
+  // since. Holding the Stop hook only then keeps the desktop app snappy when it is in use there.
+  webDriving(sessionId) {
+    const sent = this.webSends.get(sessionId) || 0;
+    const opened = this.webActivity.get(sessionId) || 0;
+    const typedInApp = this.appPrompts.get(sessionId) || 0;
+    if (sent && sent > typedInApp) return true;
+    return opened > typedInApp && Date.now() - opened < 5 * 60 * 1000;
+  }
+
+  // The desktop app records a user frame as soon as a prompt is submitted there, even while a
+  // hook is still running: a frame newer than the hold means "the user is back at the PC".
+  appTypedSince(sessionId, sinceMs) {
+    const d = this.desktop.info(sessionId);
+    return !!d && d.userFrameAt > sinceMs;
+  }
+
   // Resolves true as soon as a message is queued for the session, false after `ms`, when the
   // last web client leaves (holding the terminal makes no sense then) or when the hook is gone.
   waitForQueued(sessionId, ms, signal) {
     if ((this.queues.get(sessionId) || []).length) return Promise.resolve(true);
     if (signal?.aborted) return Promise.resolve(false);
+    const startedAt = Date.now();
     return new Promise((resolve) => {
       let done = false;
       const finish = (v) => {
@@ -430,7 +459,8 @@ export class AgentServer {
       signal?.addEventListener('abort', onAbort);
       const timer = setTimeout(() => finish(false), ms);
       const poll = setInterval(() => {
-        if (this.clients.size === 0) finish(false);
+        // Nobody on the web any more, or the user started typing in the app: let the turn end now.
+        if (this.clients.size === 0 || this.appTypedSince(sessionId, startedAt)) finish(false);
       }, 1000);
       this.queueWaiters.get(sessionId)?.(false); // an older hold for the same session gives way
       this.queueWaiters.set(sessionId, finish);
@@ -530,7 +560,7 @@ export class AgentServer {
           // needed, and the terminal owns the conversation so the SDK must not resume it).
           // Without a CLI login the SDK cannot resume an idle session either, so the message is
           // queued the same way and reaches Claude the next time that session runs on the PC.
-          this.markWebActivity(sessionId);
+          this.markWebActivity(sessionId, { sent: true });
           const live = this.isLiveElsewhere(sessionId);
           if (live || (this.loggedIn === false && hooksStatus().installed)) {
             const q = this.queues.get(sessionId) || [];

@@ -27,6 +27,9 @@ Options:
                         reverse proxy...): also print a link with this stable URL (saved; "off" clears)
   --web <url>           Web UI base URL used in the connection link (saved)
   --hook-wait <sec>     How long a terminal session waits for a web answer (saved)
+  --stop-hold <sec>     After a turn ends in a session driven from the web, keep it reachable
+                        this long so a message from the phone is delivered at once (default 120;
+                        0 disables; saved; re-run --install-hooks after changing it)
   --install-hooks       Add Claude Code hooks (~/.claude/settings.json) and exit
   --uninstall-hooks     Remove the hooks and exit
   --no-hooks            Start without asking about hooks
@@ -47,6 +50,7 @@ function parseArgs(argv) {
       case '--public-url': out.publicUrl = String(next()); break;
       case '--web': out.web = String(next()); break;
       case '--hook-wait': out.hookWait = Number(next()); break;
+      case '--stop-hold': out.stopHold = Number(next()); break;
       case '--install-hooks': out.installHooks = true; break;
       case '--uninstall-hooks': out.uninstallHooks = true; break;
       case '--no-hooks': out.noHooks = true; break;
@@ -165,6 +169,11 @@ async function main() {
   if (Number.isFinite(args.hookWait) && args.hookWait >= 5) {
     cfg.hookWaitSeconds = Math.floor(args.hookWait);
     saveConfig(cfg);
+  }
+  if (Number.isFinite(args.stopHold) && args.stopHold >= 0) {
+    cfg.stopHoldSeconds = Math.min(3600, Math.floor(args.stopHold));
+    saveConfig(cfg);
+    log(`stop hold set to ${cfg.stopHoldSeconds}s (run --install-hooks to update the hook timeout)`);
   }
   if (args.installHooks) {
     const st = installHooks(cfg);
