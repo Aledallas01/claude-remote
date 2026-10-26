@@ -29,6 +29,15 @@ messages, from any browser or phone, while Claude keeps running on your own PC.
 
 ## Quick start (Windows)
 
+**Installer.** Download `ClaudeRemoteSetup.exe` from the
+[latest release](https://github.com/Aledallas01/claude-remote/releases/latest) and run it (or run
+`installer\Install-ClaudeRemote.bat` from a checkout). It installs Node.js if missing (winget),
+downloads the project to `%LOCALAPPDATA%\Programs\ClaudeRemote`, installs the Claude Code hooks and
+puts the tray app in your Startup folder. Everything is per user, no administrator rights. The tray
+app then keeps itself up to date (menu → *Automatic updates*; or `agent\update.ps1 -Apply`).
+
+**By hand:**
+
 1. Install [Node.js 18+](https://nodejs.org). No login or API key is needed: the agent works
    with the Claude Code you already use. (Only *starting new sessions from the web* needs the
    `claude` CLI to be logged in; see Troubleshooting.)

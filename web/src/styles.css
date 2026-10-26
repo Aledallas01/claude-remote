@@ -428,8 +428,18 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .md th { background: var(--bg-3); font-weight: 600; color: var(--text-2); }
 .md td { white-space: normal; min-width: 90px; }
 .md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--bg-3) 40%, transparent); }
-.code.diff-old { color: var(--err); background: color-mix(in srgb, var(--err) 8%, var(--bg-2)); }
-.code.diff-new { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--bg-2)); }
+/* Diff of an Edit / Write: one line per row, coloured gutter sign, folds for unchanged runs. */
+.file-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 4px; }
+.file-head .mono { flex: 1; color: var(--text-2); }
+.diff { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+.diff-line { display: flex; white-space: pre; min-width: max-content; padding: 0 8px 0 0; }
+.diff-sign { width: 22px; flex: none; text-align: center; color: var(--muted); user-select: none; }
+.diff-text { flex: 1; }
+.diff-line.add { background: var(--diff-add-bg); color: var(--ok); }
+.diff-line.del { background: var(--diff-del-bg); color: var(--err); }
+.diff-line.ctx { color: var(--text-2); }
+.diff-fold { display: block; width: 100%; text-align: left; background: var(--bg-3); border: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); color: var(--muted); font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+.diff-fold:hover { color: var(--text-2); }
 .code.result { max-height: 260px; }
 
 /* Tool calls: one compact line, expandable. ⏺ marker takes the result colour. */
@@ -501,6 +511,14 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
 .composer-row { display: flex; align-items: center; gap: 8px; }
 .composer-row .input.compact { background: transparent; border-color: transparent; color: var(--muted); }
 .composer-row .input.compact:hover { background: var(--bg-4); }
+.icon-round { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.icon-round:hover { background: var(--bg-4); color: var(--text); }
+.icon-round:disabled { opacity: 0.4; cursor: default; }
+.attach-strip { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 4px 6px; }
+.attach-thumb { position: relative; width: 72px; height: 72px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-2); }
+.attach-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.attach-remove { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer; font-size: 15px; line-height: 22px; padding: 0; }
+.msg-img { display: block; max-width: 100%; max-height: 260px; border-radius: 10px; margin: 4px 0; }
 .send-btn {
   width: 34px;
   height: 34px;

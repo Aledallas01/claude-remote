@@ -1,7 +1,8 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { Block, Msg } from '../types';
 import type { T, Lang } from '../i18n';
 import { renderMarkdown } from '../markdown';
+import { addedRows, lineDiff, type DiffRow } from '../diff';
 
 type ToolUse = Block & { type: 'tool_use' };
 type ToolResult = Block & { type: 'tool_result' };
@@ -42,7 +43,56 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
   }
 }
 
-export function ToolInput({ name, input }: { name: string; input: Record<string, unknown> }) {
+// "Open on the PC": handled by the app (it owns the agent connection), so a tool row anywhere
+// just raises an event with the path.
+export function requestOpenFile(path: string, line?: number) {
+  window.dispatchEvent(new CustomEvent('claude-remote:open-file', { detail: { path, line } }));
+}
+
+function FileHead({ path, t }: { path: string; t: T }) {
+  if (!path) return null;
+  return (
+    <div className="file-head">
+      <span className="mono small ellipsis" title={path}>
+        {path}
+      </span>
+      <button className="btn compact" type="button" onClick={() => requestOpenFile(path)}>
+        {t('openOnPc')}
+      </button>
+    </div>
+  );
+}
+
+function DiffView({ rows, t }: { rows: DiffRow[]; t: T }) {
+  const [open, setOpen] = useState<Set<number>>(() => new Set());
+  return (
+    <div className="diff">
+      {rows.map((r, i) =>
+        r.kind === 'fold' ? (
+          open.has(i) ? (
+            r.rows.map((x, k) => (
+              <div key={`${i}-${k}`} className={`diff-line ${x.kind}`}>
+                <span className="diff-sign">{x.kind === 'add' ? '+' : x.kind === 'del' ? '-' : ' '}</span>
+                <span className="diff-text">{x.text}</span>
+              </div>
+            ))
+          ) : (
+            <button key={i} type="button" className="diff-fold" onClick={() => setOpen((s) => new Set(s).add(i))}>
+              {t('foldedLines').replace('{n}', String(r.count))}
+            </button>
+          )
+        ) : (
+          <div key={i} className={`diff-line ${r.kind}`}>
+            <span className="diff-sign">{r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' '}</span>
+            <span className="diff-text">{r.text}</span>
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+export function ToolInput({ name, input, t }: { name: string; input: Record<string, unknown>; t: T }) {
   if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') {
     return (
       <>
@@ -52,19 +102,28 @@ export function ToolInput({ name, input }: { name: string; input: Record<string,
     );
   }
   if (name === 'Edit' && typeof input.old_string === 'string') {
+    const rows = useMemo(() => lineDiff(input.old_string as string, String(input.new_string ?? '')), [input.old_string, input.new_string]);
     return (
       <>
-        <div className="small mono">{String(input.file_path || '')}</div>
-        <pre className="code diff-old">{`- ${input.old_string}`}</pre>
-        <pre className="code diff-new">{`+ ${String(input.new_string ?? '')}`}</pre>
+        <FileHead path={String(input.file_path || '')} t={t} />
+        <DiffView rows={rows} t={t} />
       </>
     );
   }
   if (name === 'Write' && typeof input.content === 'string') {
+    const rows = useMemo(() => addedRows(input.content as string), [input.content]);
     return (
       <>
-        <div className="small mono">{String(input.file_path || '')}</div>
-        <pre className="code">{input.content}</pre>
+        <FileHead path={String(input.file_path || '')} t={t} />
+        <DiffView rows={rows} t={t} />
+      </>
+    );
+  }
+  if ((name === 'Read' || name === 'NotebookEdit') && typeof (input.file_path || input.notebook_path) === 'string') {
+    return (
+      <>
+        <FileHead path={String(input.file_path || input.notebook_path)} t={t} />
+        <pre className="code">{JSON.stringify(input, null, 2)}</pre>
       </>
     );
   }
@@ -91,7 +150,7 @@ function ToolRow({ block, results, t }: { block: ToolUse; results: Results; t: T
         </span>
       </summary>
       <div className="tool-body">
-        <ToolInput name={block.name} input={block.input} />
+        <ToolInput name={block.name} input={block.input} t={t} />
         {res && (
           <>
             <div className={`result-head ${res.isError ? 'err' : ''}`}>
@@ -391,7 +450,7 @@ export const MessageGroup = memo(function MessageGroup({ group, results, plans, 
         <div className="bubble">
           {group.items.map((m, i) => (
             <div key={m.uuid || i} className={m.optimistic ? 'optimistic' : ''}>
-              {m.blocks.map((b, j) => (b.type === 'text' ? <Text key={j} text={b.text} /> : b.type === 'image' ? <div key={j} className="muted small">[image]</div> : null))}
+              {m.blocks.map((b, j) => (b.type === 'text' ? <Text key={j} text={b.text} /> : b.type === 'image' ? b.url ? <img key={j} className="msg-img" src={b.url} alt="" /> : <div key={j} className="muted small">[{t('imageLabel')}]</div> : null))}
             </div>
           ))}
         </div>
@@ -405,7 +464,7 @@ export const MessageGroup = memo(function MessageGroup({ group, results, plans, 
       {runs.map((r) => {
         switch (r.kind) {
           case 'text':
-            return r.block.type === 'text' ? <Text key={r.key} text={r.block.text} /> : <div key={r.key} className="muted small">[image]</div>;
+            return r.block.type === 'text' ? <Text key={r.key} text={r.block.text} /> : <div key={r.key} className="muted small">[{t('imageLabel')}]</div>;
           case 'tools':
             return <ToolRun key={r.key} blocks={r.blocks} results={results} t={t} />;
           case 'plan': {

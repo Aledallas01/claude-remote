@@ -236,14 +236,18 @@ export class SessionRunner {
     }, IDLE_CLOSE_MS);
   }
 
-  send(text) {
+  // images: [{ type: 'image/jpeg', data: base64 }] -> sent as image content blocks before the text.
+  send(text, images = []) {
     if (this.status === 'closed') throw new Error('runner closed');
     if (!this.q) this.start();
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.status = 'running';
+    const content = images.length
+      ? [...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.type, data: im.data } })), ...(text ? [{ type: 'text', text }] : [])]
+      : text;
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: this.sessionId || '',
     });

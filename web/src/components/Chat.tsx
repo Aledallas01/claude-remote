@@ -1,5 +1,32 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Msg, PendingRequest, Project, SessionMeta } from '../types';
+import type { Attachment, Msg, PendingRequest, Project, SessionMeta } from '../types';
+
+const MAX_ATTACHMENTS = 4;
+const MAX_EDGE = 1600;
+
+// Resizes a picked image on the device (phones produce 4000px photos) and returns JPEG base64.
+async function prepareImage(file: File): Promise<Attachment> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+    return { name: file.name, type: file.type || 'image/jpeg', data: dataUrl.split(',')[1] || '', url: dataUrl };
+  }
+  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const keepPng = file.type === 'image/png' && file.size < 1_500_000; // screenshots with text stay sharp
+  const type = keepPng ? 'image/png' : 'image/jpeg';
+  const url = canvas.toDataURL(type, 0.85);
+  return { name: file.name.replace(/\.[^.]+$/, '') + (keepPng ? '.png' : '.jpg'), type, data: url.split(',')[1] || '', url };
+}
 import type { T, Lang } from '../i18n';
 import { collectResults, groupMessages, lastRecap, MessageGroup, planSnapshots, RecapBox } from './Messages';
 import { RequestCard, type Answer } from './Requests';
@@ -29,7 +56,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
   source?: 'sdk' | 'hook';
   pending: PendingRequest[];
   queued?: number;
-  onSend: (text: string, permissionMode: string, cwd?: string) => Promise<void>;
+  onSend: (text: string, permissionMode: string, cwd?: string, images?: Attachment[]) => Promise<void>;
   onInterrupt: () => void;
   onUnqueue?: () => void;
   onAnswer: (req: PendingRequest, a: Answer) => void;
@@ -97,14 +124,24 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focusRequestId, pending, loaded]);
 
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const addFiles = async (files: FileList | null) => {
+    if (!files) return;
+    const picked = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, MAX_ATTACHMENTS - attachments.length);
+    const prepared = await Promise.all(picked.map(prepareImage));
+    setAttachments((a) => [...a, ...prepared].slice(0, MAX_ATTACHMENTS));
+  };
+
   const submit = async () => {
     const body = text.trim();
-    if (!body || busy) return;
+    if ((!body && attachments.length === 0) || busy) return;
     if (isNew && !cwd.trim()) return;
     setBusy(true);
     try {
-      await onSend(body, mode, isNew ? cwd.trim() : undefined);
+      await onSend(body, mode, isNew ? cwd.trim() : undefined, attachments.length ? attachments : undefined);
       setText('');
+      setAttachments([]);
       stick.current = true;
     } catch (err) {
       alert((err as Error).message);
@@ -228,6 +265,18 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
           </div>
         )}
         <div className="composer-box">
+          {attachments.length > 0 && (
+            <div className="attach-strip">
+              {attachments.map((a, i) => (
+                <div key={i} className="attach-thumb">
+                  <img src={a.url} alt={a.name} />
+                  <button type="button" className="attach-remove" aria-label={t('removeAttachment')} onClick={() => setAttachments((list) => list.filter((_, k) => k !== i))}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             className="composer-input"
             rows={2}
@@ -242,6 +291,13 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
             placeholder={isNew ? t('composerPlaceholderNew') : t('composerPlaceholder')}
           />
           <div className="composer-row">
+            <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => addFiles(e.target.files).then(() => { if (fileInput.current) fileInput.current.value = ''; })} />
+            <button type="button" className="icon-round" onClick={() => fileInput.current?.click()} disabled={attachments.length >= MAX_ATTACHMENTS} aria-label={t('attach')} title={t('attach')}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 7h3l2-3h6l2 3h3v12H4z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+            </button>
             <select className="input compact" value={mode} onChange={(e) => changeMode(e.target.value as (typeof MODES)[number])} aria-label={t('permissionMode')} title={t('permissionMode')}>
               <option value="default">{t('modeDefault')}</option>
               <option value="acceptEdits">{t('modeAcceptEdits')}</option>
@@ -253,7 +309,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
                 {t('stop')}
               </button>
             )}
-            <button className="send-btn" onClick={submit} disabled={busy || !text.trim() || (isNew && !cwd.trim())} aria-label={t('send')} title={t('send')}>
+            <button className="send-btn" onClick={submit} disabled={busy || (!text.trim() && attachments.length === 0) || (isNew && !cwd.trim())} aria-label={t('send')} title={t('send')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 19V5M5 12l7-7 7 7" />
               </svg>

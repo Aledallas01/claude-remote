@@ -21,6 +21,20 @@ import { allLinks } from './links.js';
 import QRCode from 'qrcode';
 import { execFile } from 'node:child_process';
 
+// Opens a file with VS Code when it is on the PATH (goes to the line), else with the OS default.
+function openOnPc(file, line) {
+  return new Promise((resolve, reject) => {
+    const opts = { timeout: 8000, windowsHide: true };
+    const fallback = () => {
+      if (process.platform === 'win32') execFile('cmd.exe', ['/c', 'start', '', file], opts, (err) => (err ? reject(err) : resolve()));
+      else if (process.platform === 'darwin') execFile('open', [file], opts, (err) => (err ? reject(err) : resolve()));
+      else execFile('xdg-open', [file], opts, (err) => (err ? reject(err) : resolve()));
+    };
+    const codeCmd = process.platform === 'win32' ? 'code.cmd' : 'code';
+    execFile(codeCmd, ['-g', line ? `${file}:${line}` : file], opts, (err) => (err ? fallback() : resolve()));
+  });
+}
+
 // Which Claude Code sessions have a live process right now, from the process list: the desktop
 // app resumes sessions with `--resume=<id>`, so those ids are visible. Cached for a few seconds.
 // Sessions started fresh carry no id on the command line; the hook states cover those.
@@ -93,7 +107,7 @@ class QueueStore extends Map {
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const AUTH_TIMEOUT_MS = 8000;
-const MAX_PAYLOAD = 1024 * 1024;
+const MAX_PAYLOAD = 24 * 1024 * 1024; // room for a few phone photos (base64) in one message
 const MAX_PROMPT_CHARS = 100_000;
 const FAIL_WINDOW_MS = 10 * 60 * 1000;
 const FAIL_MAX = 8;
@@ -505,6 +519,38 @@ export class AgentServer {
     };
   }
 
+  // ---------- attachments ----------
+  // Images sent from the phone are stored under the agent's data folder (never inside a project)
+  // and referenced by path, so Claude can look at them with its Read tool.
+  saveAttachments(list) {
+    if (!Array.isArray(list) || !list.length) return [];
+    const dir = path.join(configDir(), 'attachments');
+    fs.mkdirSync(dir, { recursive: true });
+    const out = [];
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    list.slice(0, 4).forEach((im, i) => {
+      const type = String(im?.type || '');
+      const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[type];
+      if (!ext || typeof im.data !== 'string') throw new Error('unsupported attachment type');
+      const buf = Buffer.from(im.data, 'base64');
+      if (!buf.length || buf.length > 6 * 1024 * 1024) throw new Error('attachment too large (max 6 MB)');
+      const file = path.join(dir, `${stamp}-${i + 1}.${ext}`);
+      fs.writeFileSync(file, buf, { mode: 0o600 });
+      out.push({ file, type, data: im.data });
+    });
+    // Keep the folder small: drop files older than 7 days.
+    try {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      for (const f of fs.readdirSync(dir)) {
+        const p = path.join(dir, f);
+        if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
+      }
+    } catch {
+      /* best effort */
+    }
+    return out;
+  }
+
   // ---------- status inferred from transcript writes ----------
   // The hooks tell us when a turn starts and ends, but a session can be working without the
   // agent having seen its prompt (started before the agent, prompt typed while the agent was
@@ -711,9 +757,16 @@ export class AgentServer {
         return this.send(ws, { type: 'ok', reqId });
       }
       case 'send': {
-        const text = typeof msg.text === 'string' ? msg.text : '';
-        if (!text.trim()) throw new Error('empty message');
+        let text = typeof msg.text === 'string' ? msg.text : '';
+        const images = this.saveAttachments(msg.images);
+        if (!text.trim() && !images.length) throw new Error('empty message');
         if (text.length > MAX_PROMPT_CHARS) throw new Error('message too long');
+        // Through the hooks only text travels: the files are saved on the PC and Claude is told
+        // where they are (the Read tool shows images). The SDK path also gets real image blocks.
+        if (images.length) {
+          const note = images.map((im) => `[Attached image from the phone: ${im.file}]`).join('\n');
+          text = `${text.trim()}\n\n${note}\nView ${images.length > 1 ? 'these images' : 'this image'} with the Read tool before answering.`.trim();
+        }
         let sessionId = msg.sessionId ? String(msg.sessionId) : null;
         let cwd = typeof msg.cwd === 'string' ? msg.cwd.trim() : '';
         if (sessionId) {
@@ -762,7 +815,7 @@ export class AgentServer {
           subs.add(sessionId);
           ws.subs = subs;
         }
-        runner.send(text);
+        runner.send(text, images.map((im) => ({ type: im.type, data: im.data })));
         return this.send(ws, { type: 'ok', reqId, sessionId, clientRef });
       }
       case 'interrupt': {
@@ -788,6 +841,19 @@ export class AgentServer {
         };
         const ok = this.hub.finish(id, answer, answer.release ? 'released' : 'answered');
         if (!ok) throw new Error('request no longer pending');
+        return this.send(ws, { type: 'ok', reqId });
+      }
+      case 'open_file': {
+        // Opens a file on the PC (editor if `code` is available, otherwise the default app).
+        // Only files inside a known project folder or the agent's attachments folder.
+        const p = path.resolve(String(msg.path || ''));
+        const line = Number.isFinite(Number(msg.line)) && Number(msg.line) > 0 ? Math.floor(Number(msg.line)) : null;
+        const roots = [...new Set([...this.store.listSessions().map((s) => s.cwd).filter(Boolean), path.join(configDir(), 'attachments')])].map((r) => path.resolve(r));
+        const inside = roots.some((r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
+        if (!inside) throw new Error('this path is outside the project folders known to the agent');
+        if (!fs.existsSync(p) || !fs.statSync(p).isFile()) throw new Error('file not found on the PC');
+        await openOnPc(p, line);
+        this.log(`opened on the PC: ${p}${line ? `:${line}` : ''}`);
         return this.send(ws, { type: 'ok', reqId });
       }
       case 'push_subscribe': {

@@ -41,7 +41,7 @@ export function PermissionCard({ req, t, onAnswer, sessionTitle }: { req: Pendin
       {sessionTitle && <div className="muted small ellipsis">{sessionTitle}</div>}
       <div className="muted small">{req.source === 'hook' ? t('fromHook') : t('fromSdk')} · {req.cwd}</div>
       <div className="card-body">
-        <ToolInput name={req.toolName} input={req.input} />
+        <ToolInput name={req.toolName} input={req.input} t={t} />
       </div>
       {showReason && <textarea className="input" rows={2} placeholder={t('denyReason')} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />}
       <div className="card-actions">

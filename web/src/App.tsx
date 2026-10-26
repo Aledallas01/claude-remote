@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AgentClient, loadConnection, parseLink, saveConnection, type ConnStatus } from './agent';
 import { detectLang, makeT, type Lang } from './i18n';
-import type { AgentInfo, Connection, Msg, PendingRequest, Project, SessionMeta, SessionState, SidebarSection } from './types';
+import type { AgentInfo, Attachment, Connection, Msg, PendingRequest, Project, SessionMeta, SessionState, SidebarSection } from './types';
 import { Connect, Logo } from './components/Connect';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
@@ -392,7 +392,21 @@ export default function App() {
       if (d.type === 'open') showRequest(d.sessionId || null, d.requestId || null);
     };
     navigator.serviceWorker?.addEventListener('message', onSwMessage);
-    return () => navigator.serviceWorker?.removeEventListener('message', onSwMessage);
+    // "Open on the PC" from a tool row anywhere in the UI.
+    const onOpenFile = (ev: Event) => {
+      const d = (ev as CustomEvent).detail || {};
+      if (!d.path) return;
+      client
+        .request({ type: 'open_file', path: d.path, line: d.line })
+        .then(() => dispatch({ type: 'toast', text: t('opened') }))
+        .catch((err) => dispatch({ type: 'toast', text: err.message, kind: 'error' }));
+    };
+    window.addEventListener('claude-remote:open-file', onOpenFile);
+    return () => {
+      navigator.serviceWorker?.removeEventListener('message', onSwMessage);
+      window.removeEventListener('claude-remote:open-file', onOpenFile);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRequest]);
   const pendingOpen = useRef<{ sessionId: string | null; requestId: string | null } | null>(null);
   useEffect(() => {
@@ -416,18 +430,22 @@ export default function App() {
     dispatch({ type: 'draft', draft: { clientRef: crypto.randomUUID(), cwd: '', messages: [] } });
   };
 
-  const sendMessage = async (text: string, permissionMode: string, cwd?: string) => {
-    const msg: Msg = { role: 'user', ts: new Date().toISOString(), blocks: [{ type: 'text', text }], optimistic: true, uuid: `local-${Date.now()}` };
+  const sendMessage = async (text: string, permissionMode: string, cwd?: string, images?: Attachment[]) => {
+    const blocks: Msg['blocks'] = [];
+    for (const im of images || []) blocks.push({ type: 'image', url: im.url });
+    if (text) blocks.push({ type: 'text', text });
+    const msg: Msg = { role: 'user', ts: new Date().toISOString(), blocks, optimistic: true, uuid: `local-${Date.now()}` };
+    const payload = images?.length ? { images: images.map((im) => ({ name: im.name, type: im.type, data: im.data })) } : {};
     if (state.current === 'new' && state.draft) {
       const draft = { ...state.draft, cwd: cwd || state.draft.cwd };
       dispatch({ type: 'draft', draft });
       dispatch({ type: 'draft_message', message: msg });
-      await client.request({ type: 'send', cwd: draft.cwd, text, permissionMode, clientRef: draft.clientRef });
+      await client.request({ type: 'send', cwd: draft.cwd, text, permissionMode, clientRef: draft.clientRef, ...payload }, 60000);
       return;
     }
     if (!state.current) return;
     dispatch({ type: 'optimistic', sessionId: state.current, message: msg });
-    await client.request({ type: 'send', sessionId: state.current, text, permissionMode });
+    await client.request({ type: 'send', sessionId: state.current, text, permissionMode, ...payload }, 60000);
   };
 
   const interrupt = () => {

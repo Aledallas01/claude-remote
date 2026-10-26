@@ -1,0 +1,36 @@
+# Builds ClaudeRemoteSetup.exe from installer/install.ps1 (ps2exe) and attaches it to the
+# GitHub release when a v* tag is pushed. The exe is the same script wrapped in a console
+# program, so it can be downloaded and double-clicked without touching PowerShell.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the installer exe
+        shell: pwsh
+        run: |
+          Install-Module ps2exe -Force -Scope CurrentUser
+          Import-Module ps2exe
+          Invoke-ps2exe -inputFile installer/install.ps1 -outputFile ClaudeRemoteSetup.exe -title 'Claude Remote Setup' -description 'Installs Claude Remote for the current user' -version '0.1.0.0' -noOutput:$false
+          Get-Item ClaudeRemoteSetup.exe | Format-List Name, Length
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ClaudeRemoteSetup.exe
+            installer/install.ps1
+            installer/Install-ClaudeRemote.bat
+          generate_release_notes: true
+      - name: Keep the exe as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeRemoteSetup
+          path: ClaudeRemoteSetup.exe

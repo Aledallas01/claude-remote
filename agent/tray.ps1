@@ -34,6 +34,9 @@ $T = if ($it) { @{
   qrFor = 'QR per'; scan = 'Inquadra il QR dal telefono (dentro l''app o con la fotocamera): si collega da solo.'
   copied = 'Link copiato negli appunti'; close = 'Chiudi'; version = 'Versione'; since = 'Attivo da'; none = 'nessuno'
   tip = 'Claude Remote: agent'; devices = 'dispositivi'
+  checkUpdates = 'Controlla aggiornamenti'; autoUpdate = 'Aggiornamenti automatici'; upToDate = 'Nessun aggiornamento disponibile'
+  updating = 'Aggiornamento in corso, riavvio tra poco…'; updated = 'Aggiornato: riavvio in corso'; updateFailed = 'Aggiornamento non riuscito'
+  updateAvailable = 'Aggiornamento disponibile'; install = 'Installa'
 } } else { @{
   title = 'Claude Remote'; open = 'Open panel'; copy = 'Copy link'; site = 'Open the website'; log = 'Open log'
   restart = 'Restart agent'; quit = 'Quit'; status = 'Status'; running = 'running'; starting = 'starting…'
@@ -44,6 +47,9 @@ $T = if ($it) { @{
   qrFor = 'QR for'; scan = 'Scan the QR with your phone (inside the app or with the camera): it connects by itself.'
   copied = 'Link copied to the clipboard'; close = 'Close'; version = 'Version'; since = 'Up since'; none = 'none'
   tip = 'Claude Remote: agent'; devices = 'devices'
+  checkUpdates = 'Check for updates'; autoUpdate = 'Automatic updates'; upToDate = 'No update available'
+  updating = 'Updating, restarting shortly…'; updated = 'Updated: restarting'; updateFailed = 'Update failed'
+  updateAvailable = 'Update available'; install = 'Install'
 } }
 
 function Read-Config { try { Get-Content $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $null } }
@@ -84,6 +90,47 @@ function Get-QrImage([string]$kind) {
     return [System.Drawing.Image]::FromStream($ms)
   } catch { return $null }
 }
+# ---------- updates ----------
+$updateScript = Join-Path $agentDir 'update.ps1'
+$vbsStart = Join-Path $agentDir 'start-hidden.vbs'
+function Get-AutoUpdate { $c = Read-Config; if ($c -and $null -ne $c.autoUpdate) { return [bool]$c.autoUpdate }; return $true }
+function Set-AutoUpdate([bool]$on) {
+  try {
+    $c = Get-Content $cfgPath -Raw | ConvertFrom-Json
+    $c | Add-Member -NotePropertyName autoUpdate -NotePropertyValue $on -Force
+    $c | ConvertTo-Json -Depth 8 | Set-Content $cfgPath -Encoding UTF8
+  } catch {}
+}
+function Check-Update {
+  try {
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updateScript -Check 2>$null | Select-Object -Last 1
+    return ($out | ConvertFrom-Json)
+  } catch { return $null }
+}
+# Applies the update in a separate process, then restarts everything (tray included, since
+# tray.ps1 itself may have changed): the new tray starts the new agent.
+function Apply-Update {
+  $notify.ShowBalloonTip(4000, $T.title, $T.updating, [System.Windows.Forms.ToolTipIcon]::Info)
+  $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $updateScript, '-Apply' -WindowStyle Hidden -PassThru -Wait
+  if ($p.ExitCode -ne 0) { $notify.ShowBalloonTip(4000, $T.title, $T.updateFailed, [System.Windows.Forms.ToolTipIcon]::Warning); return }
+  $notify.ShowBalloonTip(3000, $T.title, $T.updated, [System.Windows.Forms.ToolTipIcon]::Info)
+  $timer.Stop()
+  Stop-Agent
+  Start-Sleep -Seconds 1
+  $mutex.ReleaseMutex() | Out-Null
+  Start-Process cmd.exe -ArgumentList '/c', ('timeout /t 2 /nobreak >nul & wscript.exe "' + $vbsStart + '"') -WindowStyle Hidden
+  $notify.Visible = $false
+  [System.Windows.Forms.Application]::Exit()
+}
+$script:lastUpdateCheck = [datetime]::MinValue
+function Maybe-AutoUpdate {
+  if (-not (Get-AutoUpdate)) { return }
+  if (((Get-Date) - $script:lastUpdateCheck).TotalHours -lt 6) { return }
+  $script:lastUpdateCheck = Get-Date
+  $u = Check-Update
+  if ($u -and $u.updateAvailable) { Apply-Update }
+}
+
 function Stop-Agent {
   $cfg = Read-Config
   $done = $false
@@ -275,8 +322,21 @@ $mCopy = $menu.Items.Add($T.copy)
 $mSite = $menu.Items.Add($T.site)
 $mLog = $menu.Items.Add($T.log)
 [void]$menu.Items.Add('-')
+$mCheck = $menu.Items.Add($T.checkUpdates)
+$mAuto = $menu.Items.Add($T.autoUpdate)
+$mAuto.CheckOnClick = $true
+$mAuto.Checked = Get-AutoUpdate
+[void]$menu.Items.Add('-')
 $mRestart = $menu.Items.Add($T.restart)
 $mQuit = $menu.Items.Add($T.quit)
+$mAuto.Add_CheckedChanged({ Set-AutoUpdate $mAuto.Checked })
+$mCheck.Add_Click({
+  $u = Check-Update
+  if (-not $u) { $notify.ShowBalloonTip(3000, $T.title, $T.updateFailed, [System.Windows.Forms.ToolTipIcon]::Warning); return }
+  if (-not $u.updateAvailable) { $notify.ShowBalloonTip(3000, $T.title, $T.upToDate, [System.Windows.Forms.ToolTipIcon]::Info); return }
+  $r = [System.Windows.Forms.MessageBox]::Show(("{0}: {1} -> {2}`n{3}?" -f $T.updateAvailable, $u.local.Substring(0, 7), $u.remote.Substring(0, 7), $T.install), $T.title, [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+  if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { Apply-Update }
+})
 $notify.ContextMenuStrip = $menu
 $mOpen.Add_Click({ Show-Panel })
 $mCopy.Add_Click({ Refresh-Status; $l = Current-Link; if (-not $l -and $script:links.Count) { $l = $script:links[0] }; if ($l) { [System.Windows.Forms.Clipboard]::SetText($l.url); $notify.ShowBalloonTip(2000, $T.title, $T.copied, [System.Windows.Forms.ToolTipIcon]::Info) } })
@@ -293,6 +353,12 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
 $timer.Add_Tick({ Refresh-Status })
 $timer.Start()
+# Update check: 2 minutes after start, then every 6 hours (only when enabled).
+$script:lastUpdateCheck = (Get-Date).AddHours(-6).AddMinutes(2)
+$updTimer = New-Object System.Windows.Forms.Timer
+$updTimer.Interval = 60000
+$updTimer.Add_Tick({ try { Maybe-AutoUpdate } catch {} })
+$updTimer.Start()
 Refresh-Status
 if ($ShowWindow) { Show-Panel }
 try {

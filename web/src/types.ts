@@ -3,7 +3,15 @@ export type Block =
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; toolUseId: string; isError: boolean; text: string }
-  | { type: 'image' };
+  | { type: 'image'; url?: string }; // url: local preview of an image sent from this device
+
+// An image picked on the phone, resized on the device, sent to the agent as base64.
+export interface Attachment {
+  name: string;
+  type: string; // image/jpeg | image/png | image/webp
+  data: string; // base64, no data: prefix
+  url: string; // data URL for the preview
+}
 
 export interface Msg {
   uuid?: string;
