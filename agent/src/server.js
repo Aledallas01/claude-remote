@@ -170,6 +170,8 @@ export class AgentServer {
     this.store.on('sessions_changed', () => this.broadcastSessions());
     this.desktop.on('changed', () => this.broadcastSessions());
     this.store.on('log', (m) => log(m));
+    this.store.on('activity', ({ sessionId, cwd }) => this.noteActivity(sessionId, cwd));
+    this.inferredTimers = new Map(); // sessionId -> timer that drops an inferred "running" back to idle
   }
 
   // Session list as the web UI sees it: transcript metadata, enriched with the desktop
@@ -503,6 +505,36 @@ export class AgentServer {
     };
   }
 
+  // ---------- status inferred from transcript writes ----------
+  // The hooks tell us when a turn starts and ends, but a session can be working without the
+  // agent having seen its prompt (started before the agent, prompt typed while the agent was
+  // restarting...). A transcript that is being written means Claude is working there, so the
+  // session is shown as running; the next Stop hook (or 10 minutes of silence) ends it.
+  noteActivity(sessionId, cwd) {
+    const s = this.states.get(sessionId);
+    if (s?.source === 'sdk') return; // the SDK runner reports its own status
+    if (s?.status === 'running' || s?.status === 'waiting') {
+      if (s.inferred) this.armInferredIdle(sessionId);
+      return;
+    }
+    // A hook set this state moments ago (e.g. Stop -> idle, written after the last message): trust it.
+    if (s && Date.now() - new Date(s.updatedAt).getTime() < 8000) return;
+    this.onRunnerEvent('status', { sessionId, status: 'running', source: 'hook', cwd: s?.cwd || cwd || '', inferred: true });
+    this.armInferredIdle(sessionId);
+  }
+
+  armInferredIdle(sessionId) {
+    clearTimeout(this.inferredTimers.get(sessionId));
+    this.inferredTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.inferredTimers.delete(sessionId);
+        const s = this.states.get(sessionId);
+        if (s?.inferred && s.status === 'running') this.onRunnerEvent('status', { sessionId, status: 'idle', source: 'hook', cwd: s.cwd });
+      }, 10 * 60 * 1000),
+    );
+  }
+
   // ---------- web activity / Stop hold ----------
 
   markWebActivity(sessionId, { sent = false } = {}) {
@@ -810,8 +842,13 @@ export class AgentServer {
           cwd: payload.cwd || prev.cwd || '',
           held: !!payload.held,
           staleHooks: payload.staleHooks ?? prev.staleHooks ?? false,
+          inferred: !!payload.inferred, // a real hook event clears the inferred flag
           updatedAt: new Date().toISOString(),
         });
+        if (!payload.inferred) {
+          clearTimeout(this.inferredTimers?.get(payload.sessionId));
+          this.inferredTimers?.delete(payload.sessionId);
+        }
       }
     }
     if (type === 'session_init' && payload.sessionId) {

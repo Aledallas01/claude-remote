@@ -188,7 +188,7 @@ const it: typeof en = {
   thinking: 'Ragionamento',
   notLoggedIn: 'La CLI “claude” sul PC non ha fatto il login.',
   hookDeliverOnStop: 'Questa sessione è in esecuzione sul PC: il messaggio viene passato a Claude appena termina il turno in corso.',
-  hookDeliverIdle: 'Questa sessione è aperta sul PC e lì attende input. Un messaggio inviato da qui viene consegnato alla prossima esecuzione di Claude (oppure scrivilo nel terminale).',
+  hookDeliverIdle: 'Il messaggio viene consegnato alla prossima esecuzione di Claude.',
   queuedBanner: 'messaggio/i in attesa di consegna alla sessione sul PC',
   cancelQueue: 'Annulla',
   delivered: 'Messaggio consegnato alla sessione sul PC',

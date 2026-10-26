@@ -187,6 +187,7 @@ export class TranscriptStore extends EventEmitter {
     this.subscribed = new Set();
     this.watcher = null;
     this.pending = new Map(); // file -> timer
+    this.activityAt = new Map(); // sessionId -> last 'activity' emit (throttle)
     this.listDirty = false;
     this.listTimer = null;
   }
@@ -457,6 +458,13 @@ export class TranscriptStore extends EventEmitter {
       this.markListDirty();
     } else {
       this.markListDirty(); // order changes with recency; cheap to resend
+    }
+    // Something is writing this transcript: Claude is working in that session right now
+    // (whether or not the hooks told us). Throttled per session.
+    const lastAct = this.activityAt.get(id) || 0;
+    if (Date.now() - lastAct > 2000) {
+      this.activityAt.set(id, Date.now());
+      this.emit('activity', { sessionId: id, cwd: meta.cwd });
     }
     if (this.subscribed.has(id)) {
       const messages = await this.readNew(id);

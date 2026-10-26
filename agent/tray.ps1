@@ -31,7 +31,7 @@ $T = if ($it) { @{
   tailscale = 'Tailscale'; clients = 'Dispositivi collegati'; sessions = 'Sessioni indicizzate'; live = 'Chat vive sul PC'
   hooks = 'Hook Claude Code'; login = 'Login CLI'; push = 'Notifiche push'; yes = 'sì'; no = 'no'; installed = 'installati'
   notInstalled = 'non installati'; loggedIn = 'fatto'; notLoggedIn = 'non fatto (solo chat aperte sul PC)'
-  qrFor = 'QR per'; scan = 'Inquadra il QR dal telefono (dentro l’app o con la fotocamera): si collega da solo.'
+  qrFor = 'QR per'; scan = 'Inquadra il QR dal telefono (dentro l''app o con la fotocamera): si collega da solo.'
   copied = 'Link copiato negli appunti'; close = 'Chiudi'; version = 'Versione'; since = 'Attivo da'; none = 'nessuno'
   tip = 'Claude Remote: agent'; devices = 'dispositivi'
 } } else { @{
