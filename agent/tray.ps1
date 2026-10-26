@@ -1,4 +1,4 @@
-# Claude Remote - Windows tray application.
+﻿# Claude Remote - Windows tray application.
 # Runs the agent in the background, keeps it alive, and shows an icon in the notification area.
 # Click the icon for a window with the connection status, the links and a QR code to scan.
 # Start it with start-hidden.vbs (no console); needs -STA for the clipboard, which the VBS sets.
@@ -122,14 +122,16 @@ $iconOff = New-TrayIcon ([System.Drawing.Color]::FromArgb(140, 140, 140))
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $T.title
 $form.StartPosition = 'CenterScreen'
-$form.ClientSize = New-Object System.Drawing.Size(760, 470)
-$form.MinimumSize = New-Object System.Drawing.Size(700, 460)
+$form.ClientSize = New-Object System.Drawing.Size(760, 540)
+$form.MinimumSize = New-Object System.Drawing.Size(700, 520)
+$form.FormBorderStyle = 'FixedSingle'
+$form.MaximizeBox = $false
 $form.Icon = $iconOn
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
 
 $grid = New-Object System.Windows.Forms.TableLayoutPanel
 $grid.Location = New-Object System.Drawing.Point(16, 16)
-$grid.Size = New-Object System.Drawing.Size(390, 360)
+$grid.Size = New-Object System.Drawing.Size(390, 440)
 $grid.ColumnCount = 2
 $grid.RowCount = 0
 $grid.AutoSize = $false
@@ -177,8 +179,8 @@ $form.Controls.Add($pic)
 
 $hint = New-Object System.Windows.Forms.Label
 $hint.Text = $T.scan
-$hint.Location = New-Object System.Drawing.Point(430, 392)
-$hint.Size = New-Object System.Drawing.Size(310, 40)
+$hint.Location = New-Object System.Drawing.Point(430, 394)
+$hint.Size = New-Object System.Drawing.Size(310, 60)
 $hint.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($hint)
 
@@ -190,12 +192,12 @@ function New-Button([string]$text, [int]$x, [int]$y, [int]$w = 120) {
   $form.Controls.Add($b)
   return $b
 }
-$btnCopy = New-Button $T.copy 16 400 130
-$btnSite = New-Button $T.site 152 400 130
-$btnLog = New-Button $T.log 288 400 110
-$btnRestart = New-Button $T.restart 16 436 130
-$btnQuit = New-Button $T.quit 152 436 130
-$btnClose = New-Button $T.close 620 436 120
+$btnCopy = New-Button $T.copy 16 464 130
+$btnSite = New-Button $T.site 152 464 130
+$btnLog = New-Button $T.log 288 464 110
+$btnRestart = New-Button $T.restart 16 500 130
+$btnQuit = New-Button $T.quit 152 500 130
+$btnClose = New-Button $T.close 620 500 120
 
 $script:links = @()
 $script:status = $null
