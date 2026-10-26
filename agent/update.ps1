@@ -55,11 +55,24 @@ if ($isGit) {
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Push-Location (Join-Path $root 'agent')
-try { npm install --no-audit --no-fund 2>&1 | Out-Null } finally { Pop-Location }
+# npm writes warnings to stderr, which Windows PowerShell treats as errors under 'Stop':
+# run it through cmd and judge by the exit code.
+function Run-Npm([string]$dir, [string]$cmdline) {
+  Push-Location $dir
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & cmd.exe /c "npm $cmdline 2>&1" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "npm $cmdline failed in $dir (exit $LASTEXITCODE)" }
+  } finally {
+    $ErrorActionPreference = $prev
+    Pop-Location
+  }
+}
+Run-Npm (Join-Path $root 'agent') 'install --no-audit --no-fund --loglevel=error'
 $web = Join-Path $root 'web'
 if (Test-Path (Join-Path $web 'package.json')) {
-  Push-Location $web
-  try { npm install --no-audit --no-fund 2>&1 | Out-Null; npm run build 2>&1 | Out-Null } finally { Pop-Location }
+  Run-Npm $web 'install --no-audit --no-fund --loglevel=error'
+  Run-Npm $web 'run build'
 }
 Write-Host "Updated to $remote"

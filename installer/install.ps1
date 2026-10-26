@@ -20,6 +20,20 @@ function Refresh-Path {
   $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
 }
 function Have([string]$cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+# npm prints warnings on stderr, which Windows PowerShell turns into errors under 'Stop':
+# run it through cmd and judge by the exit code.
+function Run-Npm([string]$dir, [string]$cmdline) {
+  Push-Location $dir
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & cmd.exe /c "npm $cmdline 2>&1" | ForEach-Object { if ($_ -notmatch '^npm warn') { Write-Host "   $_" } }
+    if ($LASTEXITCODE -ne 0) { throw "npm $cmdline failed in $dir (exit $LASTEXITCODE)" }
+  } finally {
+    $ErrorActionPreference = $prev
+    Pop-Location
+  }
+}
 
 Write-Host 'Claude Remote installer' -ForegroundColor Green
 Write-Host "Install folder: $InstallDir"
@@ -65,10 +79,9 @@ if (Test-Path (Join-Path $InstallDir '.git')) {
 }
 
 Step 'Dependencies and web UI'
-Push-Location (Join-Path $InstallDir 'agent')
-try { npm install --no-audit --no-fund 2>&1 | Select-Object -Last 1 } finally { Pop-Location }
-Push-Location (Join-Path $InstallDir 'web')
-try { npm install --no-audit --no-fund 2>&1 | Select-Object -Last 1; npm run build 2>&1 | Select-Object -Last 1 } finally { Pop-Location }
+Run-Npm (Join-Path $InstallDir 'agent') 'install --no-audit --no-fund --loglevel=error'
+Run-Npm (Join-Path $InstallDir 'web') 'install --no-audit --no-fund --loglevel=error'
+Run-Npm (Join-Path $InstallDir 'web') 'run build'
 
 if (-not $SkipHooks) {
   Step 'Claude Code hooks'
