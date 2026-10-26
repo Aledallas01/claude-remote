@@ -443,7 +443,28 @@ function splitRuns(items: Msg[]): Run[] {
   return runs;
 }
 
-export const MessageGroup = memo(function MessageGroup({ group, results, plans, t, lang }: { group: Group; results: Results; plans: Map<string, PlanItem[]>; t: T; lang: Lang }) {
+// The readable text of a turn (what gets forwarded): text blocks only, tool calls left out.
+export function groupText(group: Group): string {
+  return group.items
+    .flatMap((m) => m.blocks)
+    .map((b) => (b.type === 'text' ? b.text.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function ForwardButton({ text, t, onForward }: { text: string; t: T; onForward?: (text: string) => void }) {
+  if (!onForward || !text) return null;
+  return (
+    <button type="button" className="fwd-btn" onClick={() => onForward(text)} title={t('forward')}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M15 6l6 6-6 6M21 12H9a6 6 0 0 0-6 6v1" />
+      </svg>
+      {t('forward')}
+    </button>
+  );
+}
+
+export const MessageGroup = memo(function MessageGroup({ group, results, plans, t, lang, onForward }: { group: Group; results: Results; plans: Map<string, PlanItem[]>; t: T; lang: Lang; onForward?: (text: string) => void }) {
   if (group.role === 'user') {
     return (
       <div className="msg user">
@@ -454,11 +475,15 @@ export const MessageGroup = memo(function MessageGroup({ group, results, plans, 
             </div>
           ))}
         </div>
-        <div className="msg-meta">{relativeTime(group.ts, lang)}</div>
+        <div className="msg-meta">
+          <ForwardButton text={groupText(group)} t={t} onForward={onForward} />
+          <span>{relativeTime(group.ts, lang)}</span>
+        </div>
       </div>
     );
   }
   const runs = splitRuns(group.items);
+  const text = groupText(group);
   return (
     <div className="msg assistant">
       {runs.map((r) => {
@@ -475,6 +500,11 @@ export const MessageGroup = memo(function MessageGroup({ group, results, plans, 
             return null;
         }
       })}
+      {text && onForward && (
+        <div className="msg-actions">
+          <ForwardButton text={text} t={t} onForward={onForward} />
+        </div>
+      )}
     </div>
   );
 });

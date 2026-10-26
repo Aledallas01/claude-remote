@@ -34,9 +34,11 @@ import { renderMarkdown } from '../markdown';
 
 const MODES = ['default', 'acceptEdits', 'plan'] as const;
 
-export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, partial, loaded, truncated, loadingOlder = false, onLoadOlder, status, statusSince, source, held = false, staleHooks = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer }: {
+export function Chat({ t, lang, meta, isNew, draftCwd, draftText, projects, messages, partial, loaded, truncated, loadingOlder = false, onLoadOlder, status, statusSince, source, held = false, staleHooks = false, pending, queued = 0, hookOnly = false, focusRequestId, onSend, onInterrupt, onUnqueue, onAnswer, onForward }: {
   t: T;
   lang: Lang;
+  draftText?: string; // text to start the composer with (forwarded message into a new session)
+  onForward?: (text: string) => void;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
   statusSince?: string; // when the current status began (for the "working for 1m 20s" line)
@@ -62,7 +64,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
   onAnswer: (req: PendingRequest, a: Answer) => void;
 }) {
   const liveElsewhere = (source === 'hook' || hookOnly) && !isNew;
-  const [text, setText] = useState('');
+  const [text, setText] = useState(draftText || '');
   const [mode, setMode] = useState<(typeof MODES)[number]>(() => {
     try {
       const m = localStorage.getItem('claude-remote:mode');
@@ -217,7 +219,7 @@ export function Chat({ t, lang, meta, isNew, draftCwd, projects, messages, parti
           </div>
         )}
         {groups.map((g, i) => (
-          <MessageGroup key={g.items[0].uuid || i} group={g} results={results} plans={plans} t={t} lang={lang} />
+          <MessageGroup key={g.items[0].uuid || i} group={g} results={results} plans={plans} t={t} lang={lang} onForward={onForward} />
         ))}
         {partial && (
           <div className="msg assistant streaming">

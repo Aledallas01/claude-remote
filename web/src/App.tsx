@@ -6,6 +6,7 @@ import { Connect, Logo } from './components/Connect';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { RequestCard, type Answer } from './components/Requests';
+import { ForwardPicker } from './components/ForwardPicker';
 
 interface Conversation {
   messages: Msg[];
@@ -20,6 +21,7 @@ interface Draft {
   clientRef: string;
   cwd: string;
   messages: Msg[];
+  prefill?: string; // composer text to start with (a forwarded message)
 }
 
 interface State {
@@ -419,7 +421,7 @@ export default function App() {
   }, [state.sessions.length, showRequest]);
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const startNew = async () => {
+  const startNew = async (prefill?: string) => {
     setSidebarOpen(false);
     try {
       const r = await client.request({ type: 'list_projects' });
@@ -427,7 +429,36 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    dispatch({ type: 'draft', draft: { clientRef: crypto.randomUUID(), cwd: '', messages: [] } });
+    dispatch({ type: 'draft', draft: { clientRef: crypto.randomUUID(), cwd: '', messages: [], prefill } });
+  };
+
+  // Forwarding a message to another chat: the text travels like any message typed there,
+  // prefixed with where it comes from.
+  const [forward, setForward] = useState<{ text: string; from: string } | null>(null);
+  const forwardedText = (f: { text: string; from: string }) => `${t('forwardedFrom').replace('{t}', f.from || '?')}\n\n${f.text}`;
+  const forwardTo = async (sessionId: string) => {
+    if (!forward) return;
+    const target = state.sessions.find((s) => s.id === sessionId);
+    const body = forwardedText(forward);
+    setForward(null);
+    let permissionMode = 'default';
+    try {
+      permissionMode = localStorage.getItem('claude-remote:mode') || 'default';
+    } catch {
+      /* ignore */
+    }
+    try {
+      await client.request({ type: 'send', sessionId, text: body, permissionMode }, 60000);
+      dispatch({ type: 'toast', text: t('forwardedTo').replace('{t}', target?.title || sessionId) });
+    } catch (err) {
+      dispatch({ type: 'toast', text: (err as Error).message, kind: 'error' });
+    }
+  };
+  const forwardToNew = () => {
+    if (!forward) return;
+    const body = forwardedText(forward);
+    setForward(null);
+    startNew(body);
   };
 
   const sendMessage = async (text: string, permissionMode: string, cwd?: string, images?: Attachment[]) => {
@@ -654,6 +685,7 @@ export default function App() {
             key="new"
             isNew
             draftCwd={state.draft.cwd}
+            draftText={state.draft.prefill}
             projects={projects}
             messages={state.draft.messages}
             partial=""
@@ -690,6 +722,7 @@ export default function App() {
             onInterrupt={interrupt}
             onUnqueue={() => client.request({ type: 'unqueue', sessionId: state.current }).catch(() => {})}
             onAnswer={answer}
+            onForward={(text) => setForward({ text, from: currentMeta?.title || '' })}
           />
         ) : (
           <div className="empty">
@@ -705,6 +738,8 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {forward && <ForwardPicker t={t} sessions={state.sessions} states={state.states} exclude={state.current} preview={forward.text.slice(0, 160)} onPick={forwardTo} onNew={forwardToNew} onClose={() => setForward(null)} />}
 
       <div className="toasts">
         {state.toasts.map((x) => (
