@@ -17,6 +17,8 @@ import { handleHookEvent, hooksStatus } from './hooks.js';
 import { DesktopIndex } from './desktop.js';
 import { PushStore } from './push.js';
 import { configDir } from './config.js';
+import { allLinks } from './links.js';
+import QRCode from 'qrcode';
 import { execFile } from 'node:child_process';
 
 // Which Claude Code sessions have a live process right now, from the process list: the desktop
@@ -190,6 +192,7 @@ export class AgentServer {
   }
 
   async start() {
+    this.startedAt = new Date().toISOString();
     await this.store.scanAll();
     this.store.startWatching();
     try {
@@ -239,6 +242,7 @@ export class AgentServer {
       return res.end(JSON.stringify({ ok: true }));
     }
     if (url.pathname === '/hook') return this.handleHookHttp(req, res);
+    if (url.pathname.startsWith('/local/')) return this.handleLocalHttp(req, res, url);
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405);
       return res.end();
@@ -267,6 +271,74 @@ export class AgentServer {
       'cache-control': /^\/assets\//.test(rel) ? 'public, max-age=31536000, immutable' : 'no-cache',
     });
     fs.createReadStream(file).pipe(res);
+  }
+
+  // ---------- local control (tray app) ----------
+  // Loopback only and protected by the hook secret: these reveal the connection links.
+
+  setTunnel(wsBase) {
+    this.tunnelWs = wsBase || null;
+    this.broadcast({ type: 'tunnel', url: this.tunnelWs });
+  }
+
+  localStatus() {
+    return {
+      ok: true,
+      version: VERSION,
+      pid: process.pid,
+      startedAt: this.startedAt,
+      port: this.cfg.port,
+      host: this.cfg.host,
+      agentName: this.cfg.agentName,
+      webUrl: this.cfg.webUrl,
+      publicUrl: this.cfg.publicUrl || null,
+      tunnelUrl: this.tunnelWs,
+      clients: this.clients.size,
+      sessions: this.store.listSessions().length,
+      liveSessions: [...this.states.values()].filter((s) => s.source === 'hook' && s.status !== 'ended').length,
+      pending: this.hub.list().length,
+      queued: Object.values(this.queuedCounts()).reduce((a, b) => a + b, 0),
+      hooks: hooksStatus(),
+      loggedIn: this.loggedIn,
+      pushSubscriptions: this.push?.count || 0,
+      desktopApp: this.desktop.available,
+      links: allLinks(this.cfg, { tunnelWs: this.tunnelWs }),
+    };
+  }
+
+  async handleLocalHttp(req, res, url) {
+    const remote = req.socket.remoteAddress || '';
+    const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+    if (!loopback || !safeEqual(req.headers['x-claude-remote-secret'] || url.searchParams.get('secret') || '', this.cfg.hookSecret)) {
+      res.writeHead(403);
+      return res.end();
+    }
+    if (url.pathname === '/local/status') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(this.localStatus()));
+    }
+    if (url.pathname === '/local/qr.png') {
+      const links = allLinks(this.cfg, { tunnelWs: this.tunnelWs });
+      const kind = url.searchParams.get('kind') || '';
+      const link = links.find((l) => l.kind === kind) || links[0];
+      if (!link) {
+        res.writeHead(404);
+        return res.end();
+      }
+      const size = Math.min(1024, Math.max(128, Number(url.searchParams.get('size')) || 360));
+      const png = await QRCode.toBuffer(link.url, { type: 'png', width: size, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#1c1c1c', light: '#ffffff' } });
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+      return res.end(png);
+    }
+    if (url.pathname === '/local/shutdown' && req.method === 'POST') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      this.log('shutdown requested by the tray app');
+      setTimeout(() => process.emit('SIGINT'), 100); // runs the normal shutdown path (works on Windows too)
+      return undefined;
+    }
+    res.writeHead(404);
+    return res.end();
   }
 
   async handleHookHttp(req, res) {

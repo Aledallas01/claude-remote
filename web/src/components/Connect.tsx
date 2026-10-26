@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Connection } from '../types';
 import type { T, Lang } from '../i18n';
 import { normalizeAgentUrl, normalizeToken, parseLink } from '../agent';
+import { QrScanner } from './QrScanner';
 
 export function Connect({ t, lang, setLang, initial, status, error, onConnect, onForget }: {
   t: T;
@@ -17,7 +18,23 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
   const [url, setUrl] = useState(initial?.url || '');
   const [token, setToken] = useState(initial?.token || '');
   const [remember, setRemember] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const parsed = parseLink(link);
+  const canScan = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+
+  // A scanned QR holds the same link the agent prints: connect right away.
+  const onScanned = (text: string) => {
+    const c = parseLink(text);
+    setScanning(false);
+    if (c) {
+      setScanError(null);
+      onConnect(c, remember);
+    } else {
+      setScanError(t('qrNotRecognized'));
+      setLink(text);
+    }
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +55,16 @@ export function Connect({ t, lang, setLang, initial, status, error, onConnect, o
         <h2>{t('connectTitle')}</h2>
         <p className="muted small">{t('connectHelp')}</p>
         <pre className="code small">git clone https://github.com/Aledallas01/claude-remote{'\n'}cd claude-remote/agent{'\n'}start.bat   (Windows)   ·   npm install && npm start</pre>
+        {canScan && !scanning && (
+          <button className="btn primary scan-btn" type="button" onClick={() => setScanning(true)}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10" />
+            </svg>
+            {t('scanQr')}
+          </button>
+        )}
+        {scanning && <QrScanner t={t} onResult={onScanned} onClose={() => setScanning(false)} />}
+        {scanError && <div className="alert error">{scanError}</div>}
         <label className="field">
           <span>{t('pasteLink')}</span>
           <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…/#a=wss://…&t=…" autoComplete="off" spellCheck={false} />

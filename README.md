@@ -50,18 +50,24 @@ The link looks like `https://claude-remote-three.vercel.app/#a=wss://…trycloud
 Everything after `#` never leaves your browser (URL fragments are not sent to web servers), and the
 page stores it in `localStorage` only if you tick *Remember on this device*.
 
-### Run in the background at login (Windows)
+### Tray application and start at login (Windows)
 
 ```
-agent\install-autostart.bat     starts the agent now with no window, and at every login
-agent\stop.bat                  stops the background agent
-agent\uninstall-autostart.bat   removes the Startup shortcut and stops the agent
-node src\index.js --link        prints the connection link(s) again
+agent\install-autostart.bat     installs the tray app at login and starts it now
+agent\start-hidden.vbs          starts the tray app by hand (no console window)
+agent\stop.bat                  stops the tray app and the agent
+agent\uninstall-autostart.bat   removes the Startup shortcut and stops everything
+node src\index.js --link        prints the connection link(s) in a console
 ```
 
-This adds a shortcut to your own Startup folder (`shell:startup`), nothing system-wide and no
-administrator rights. Output goes to `agent\agent.log`. Run `start.bat` once first, so the hooks
-get installed and the configuration (port, public URL) is saved.
+The tray app (`tray.ps1`, Windows Forms) shows a terracotta icon in the notification area, runs the
+agent in the background and restarts it if it dies. Click the icon for a window with the status
+(addresses, connected devices, live chats, hooks, login, push), a **QR code** of the chosen link and
+buttons to copy the link, open the site or the log, restart or quit. Everything is per-user: a
+shortcut in your Startup folder (`shell:startup`), no service, no administrator rights. Output goes
+to `agent\agent.log`. Run `start.bat` once first, so the hooks get installed and the configuration
+(port, public URL) is saved. On the phone, the web app's connect screen has a *Scan the QR code*
+button (camera, decoded on the device), so the installed app connects without typing anything.
 
 ### Agent options
 

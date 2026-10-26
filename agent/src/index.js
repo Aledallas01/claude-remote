@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // Claude Remote agent entry point.
 import readline from 'node:readline';
-import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import qrcode from 'qrcode-terminal';
+import { buildLink, localAddresses, selfHosted } from './links.js';
 import { loadConfig, saveConfig, rotateToken, configPath } from './config.js';
 import { AgentServer } from './server.js';
 import { startTunnel } from './tunnel.js';
@@ -80,19 +79,6 @@ function ask(question) {
   });
 }
 
-// The agent serves the web UI itself when ../web/dist exists (start.bat builds it). Links that
-// point at a LAN / Tailscale / self-exposed address use that copy, so the phone needs to reach
-// one host only, and plain-http LAN pages can open plain ws:// sockets (browsers block ws:// from
-// an https page). The Cloudflare tunnel link keeps using the hosted web UI.
-const WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist', 'index.html');
-const selfHosted = () => fs.existsSync(WEB_DIST);
-
-function buildLink(cfg, wsBase, { self = false } = {}) {
-  const params = new URLSearchParams({ a: wsBase, t: cfg.token, n: cfg.agentName });
-  const webBase = self && selfHosted() ? wsBase.replace(/^ws/, 'http') : cfg.webUrl.replace(/\/$/, '');
-  return `${webBase}/#${params.toString()}`;
-}
-
 function printLink(cfg, wsBase, label, opts) {
   const link = buildLink(cfg, wsBase, opts);
   console.log('');
@@ -104,25 +90,6 @@ function printLink(cfg, wsBase, label, opts) {
   qrcode.generate(link, { small: true }, (code) => console.log(code));
   console.log(`Agent address: ${wsBase}`);
   console.log('');
-}
-
-// Non-loopback IPv4 addresses of this PC: LAN first, then Tailscale (100.64.0.0/10), then the rest.
-function localAddresses() {
-  const out = [];
-  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
-    for (const a of addrs || []) {
-      if (a.family !== 'IPv4' && a.family !== 4) continue;
-      if (a.internal) continue;
-      const ip = a.address;
-      if (/^169\.254\./.test(ip)) continue; // link-local: never reachable from a phone
-      const tailscale = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) || /tailscale/i.test(name);
-      // Virtual adapters are not reachable from a phone; VirtualBox host-only defaults to 192.168.56.x.
-      const virtual = /vethernet|virtualbox|vmware|hyper-v|docker|wsl|loopback/i.test(name) || /^192\.168\.56\./.test(ip);
-      out.push({ name, ip, tailscale, virtual });
-    }
-  }
-  const rank = (a) => (a.tailscale ? 1 : a.virtual ? 2 : 0);
-  return out.sort((x, y) => rank(x) - rank(y));
 }
 
 function printLocalLinks(cfg) {
@@ -302,9 +269,9 @@ async function main() {
         printLink(cfg, wsBase, 'REMOTE ACCESS (Cloudflare quick tunnel, new address on every start)');
         console.log('(a fresh tunnel address can take up to a minute to resolve; just retry if the page cannot connect at first.');
         console.log(' Some home routers block *.trycloudflare.com: use mobile data, or the links above.)');
-        server.broadcast({ type: 'tunnel', url: wsBase });
+        server.setTunnel(wsBase);
       },
-      onDown: () => server.broadcast({ type: 'tunnel', url: null }),
+      onDown: () => server.setTunnel(null),
     });
     console.log(`(this PC only: ${buildLink(cfg, localBase)})`);
   }

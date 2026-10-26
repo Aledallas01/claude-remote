@@ -157,6 +157,11 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 26px; 
   box-shadow: var(--shadow);
 }
 .connect .code { white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+.scan-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
+.scanner { position: relative; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; max-height: 60vh; }
+.scanner-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scanner-frame { position: absolute; inset: 14%; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 12px; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.35); pointer-events: none; }
+.scanner-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: rgba(0, 0, 0, 0.55); color: #fff; }
 .connect .input { min-width: 0; font-size: 16px; } /* 16px: iOS does not zoom the page on focus */
 @media (max-width: 600px) {
   .connect-wrap { padding: 8px 8px calc(16px + env(safe-area-inset-bottom)); align-items: start; }
